@@ -26,6 +26,10 @@ declare module 'react-native' {
     RESULTS: { GRANTED: string };
     request: (permission: string) => Promise<string>;
   };
+  export const Vibration: {
+    vibrate: (pattern?: number | number[], repeat?: boolean) => void;
+    cancel: () => void;
+  };
   export const Animated: any;
   export const Alert: { alert: (title: string, message?: string, buttons?: Array<{ text: string; style?: string; onPress?: () => void }>) => void };
   export const Platform: { OS: string };

@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  Vibration,
   View,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
@@ -350,6 +351,28 @@ export default function CallSessionScreen() {
     }, 650);
     return () => clearTimeout(timer);
   }, [router, session]);
+
+  useEffect(() => {
+    const isIncomingRingingForMe =
+      !!session?.id &&
+      session.status === 'ringing' &&
+      myId != null &&
+      myId === session.callee_id;
+    if (!isIncomingRingingForMe) {
+      Vibration.cancel();
+      return;
+    }
+
+    Vibration.vibrate(350);
+    const interval = setInterval(() => {
+      Vibration.vibrate(350);
+    }, 1400);
+
+    return () => {
+      clearInterval(interval);
+      Vibration.cancel();
+    };
+  }, [myId, session?.callee_id, session?.id, session?.status]);
 
   useEffect(() => {
     if (!session?.id || session.status !== 'ringing') return;

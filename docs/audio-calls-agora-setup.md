@@ -47,7 +47,7 @@ npx expo run:android
 ## 5) Basic call flow
 
 1. Open a 1:1 chat and tap the call icon.
-2. Callee is auto-routed to the incoming call screen.
+2. Callee is auto-routed to the incoming call screen and receives ring vibration feedback.
 3. Callee taps `Accept`, both users join Agora audio.
 4. While ringing: caller can `Cancel`, callee can `Accept` or `Decline`.
 5. In active call: both users can use `Mute`, `Speaker`, and `End`.
