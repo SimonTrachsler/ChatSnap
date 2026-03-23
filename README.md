@@ -27,9 +27,17 @@ App starten:
 npx expo start
 ```
 
+Ohne Tunnel (LAN):
+
+```bash
+npm run start:lan
+```
+
 ## Scripts
 
 - `npm run lint`
+- `npm run start:lan`
+- `npm run start:lan:clear`
 - `npx tsc --noEmit`
 - `npx expo-doctor`
 - `npm run prepare-assets`
