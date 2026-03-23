@@ -343,6 +343,15 @@ export default function CallSessionScreen() {
   }, [joinRtcAudio, leaveRtc, myId, session]);
 
   useEffect(() => {
+    if (!session || !TERMINAL_STATUSES.has(session.status)) return;
+    const timer = setTimeout(() => {
+      skipBeforeRemoveRef.current = true;
+      router.back();
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [router, session]);
+
+  useEffect(() => {
     if (!session?.id || session.status !== 'ringing') return;
     const createdAtMs = new Date(session.created_at).getTime();
     if (!Number.isFinite(createdAtMs)) return;
