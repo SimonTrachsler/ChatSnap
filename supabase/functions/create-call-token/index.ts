@@ -118,18 +118,23 @@ Deno.serve(async (req: Request) => {
     const probe = body?.probe === true;
 
     if (probe) {
-      const isReady = Boolean(agoraAppId && agoraAppCertificate);
+      const hasAppId = Boolean(agoraAppId);
+      const hasCertificate = Boolean(agoraAppCertificate);
       const probeResponse: TokenResponse = {
-        success: isReady,
+        success: hasAppId,
         provider: 'agora',
         appId: agoraAppId,
         channel: '',
         token: null,
         uid: String(userIdToAgoraUid(user.id)),
         expiresAt: null,
-        message: isReady
-          ? 'Agora call infrastructure is ready.'
-          : 'Audio calls are not configured yet. Missing AGORA_APP_ID and/or AGORA_APP_CERTIFICATE.',
+        message: hasAppId
+          ? (
+            hasCertificate
+              ? 'Agora call infrastructure is ready.'
+              : 'AGORA_APP_CERTIFICATE is missing. Calls can run in debug mode without secure token.'
+          )
+          : 'Audio calls are not configured yet. Missing AGORA_APP_ID.',
       };
       return new Response(JSON.stringify(probeResponse), {
         status: 200,
