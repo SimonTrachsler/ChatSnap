@@ -58,3 +58,18 @@ The app probes call readiness before enabling the call button:
 - Missing `AGORA_APP_ID`: calls are disabled.
 - `AGORA_APP_ID` present, missing `AGORA_APP_CERTIFICATE`: calls are enabled in debug mode (no secure token).
 - Both present: calls are fully enabled with secure token generation.
+
+## 7) End-to-end token flow check (local)
+
+Use this after deployment to verify that the full flow works (`auth -> thread -> call_session -> edge function token`):
+
+```bash
+npm run verify:call-token-flow
+```
+
+Required local env vars for this script:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- Optional `AGORA_APP_ID` (if set, script asserts response appId matches it)

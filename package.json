@@ -10,7 +10,8 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,json}\"",
     "prepare-assets": "node scripts/init-assets.js",
-    "supabase:set-agora-secrets": "node scripts/set-agora-secrets.mjs"
+    "supabase:set-agora-secrets": "node scripts/set-agora-secrets.mjs",
+    "verify:call-token-flow": "node scripts/verify-call-token-flow.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
