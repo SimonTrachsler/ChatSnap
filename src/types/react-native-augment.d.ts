@@ -14,6 +14,14 @@ declare module 'react-native' {
   export const Pressable: any;
   export const ActivityIndicator: any;
   export const KeyboardAvoidingView: any;
+  export const Keyboard: {
+    addListener: (eventType: string, listener: () => void) => { remove: () => void };
+  };
+  export const PermissionsAndroid: {
+    PERMISSIONS: { RECORD_AUDIO: string };
+    RESULTS: { GRANTED: string };
+    request: (permission: string) => Promise<string>;
+  };
   export const Animated: any;
   export const Alert: { alert: (title: string, message?: string, buttons?: Array<{ text: string; style?: string; onPress?: () => void }>) => void };
   export const Platform: { OS: string };

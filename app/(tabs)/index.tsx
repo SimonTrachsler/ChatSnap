@@ -10,6 +10,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { usePendingPhotoStore } from '@/store/usePendingPhotoStore';
 import { colors, radius, spacing } from '@/ui/theme';
@@ -188,9 +189,21 @@ export default function CameraScreen() {
     setCapturing(true);
     setError(null);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, skipProcessing: false });
       if (photo?.uri) {
-        setPendingPhotoUri(photo.uri);
+        let normalizedUri = photo.uri;
+        try {
+          // Re-encode once so EXIF/orientation metadata doesn't cause odd rotations in preview.
+          const normalized = await ImageManipulator.manipulateAsync(
+            photo.uri,
+            [],
+            { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          if (normalized?.uri) normalizedUri = normalized.uri;
+        } catch {
+          // Fallback to original URI if normalization fails.
+        }
+        setPendingPhotoUri(normalizedUri);
         router.push('/(tabs)/photo-preview');
       }
     } catch (e) {

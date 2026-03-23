@@ -1,0 +1,187 @@
+import { getOrCreateThread } from '@/lib/chat';
+import { supabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+type CallSessionRow = Database['public']['Tables']['call_sessions']['Row'];
+type CallSessionInsert = Database['public']['Tables']['call_sessions']['Insert'];
+
+export type CallSession = CallSessionRow;
+
+export type CallTokenResponse = {
+  success: boolean;
+  provider: string;
+  appId: string;
+  channel: string;
+  token: string | null;
+  uid: string;
+  expiresAt: string | null;
+  message?: string;
+};
+
+const ACTIVE_CALL_STATUSES = ['ringing', 'accepted'];
+const STALE_RINGING_MS = 90_000;
+
+async function requireMyUserId(): Promise<string> {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user?.id) {
+    throw new Error('Not authenticated.');
+  }
+  return user.id;
+}
+
+function makeRtcChannel(threadId: string): string {
+  return `call-${threadId}-${Date.now()}`;
+}
+
+async function expireStaleRingingCalls(threadId: string): Promise<void> {
+  const staleBeforeIso = new Date(Date.now() - STALE_RINGING_MS).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  await (supabase.from('call_sessions') as any)
+    .update({ status: 'missed' })
+    .eq('thread_id', threadId)
+    .eq('status', 'ringing')
+    .lt('created_at', staleBeforeIso);
+}
+
+async function findLatestActiveSession(threadId: string): Promise<CallSession | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for selects is narrower than runtime schema
+  const { data, error } = await (supabase.from('call_sessions') as any)
+    .select('*')
+    .eq('thread_id', threadId)
+    .in('status', ACTIVE_CALL_STATUSES)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as CallSession | null) ?? null;
+}
+
+export async function createOutgoingCallSession(calleeId: string): Promise<CallSession> {
+  const callerId = await requireMyUserId();
+  if (callerId === calleeId) {
+    throw new Error('You cannot call yourself.');
+  }
+
+  const threadId = await getOrCreateThread(calleeId);
+  await expireStaleRingingCalls(threadId);
+
+  const payload: CallSessionInsert = {
+    thread_id: threadId,
+    caller_id: callerId,
+    callee_id: calleeId,
+    provider: 'agora',
+    rtc_channel: makeRtcChannel(threadId),
+    status: 'ringing',
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for inserts is narrower than runtime schema
+  const { data, error } = await (supabase.from('call_sessions') as any)
+    .insert(payload)
+    .select('*')
+    .single();
+  if (error) {
+    const postgresCode = (error as { code?: string }).code;
+    if (postgresCode === '23505') {
+      const existing = await findLatestActiveSession(threadId);
+      if (existing) {
+        return existing;
+      }
+      throw new Error('A call with this friend is already active.');
+    }
+    throw error;
+  }
+  return data as CallSession;
+}
+
+export async function getCallSession(sessionId: string): Promise<CallSession | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for selects is narrower than runtime schema
+  const { data, error } = await (supabase.from('call_sessions') as any)
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as CallSession | null) ?? null;
+}
+
+export async function acceptCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'accepted' })
+    .eq('id', sessionId)
+    .eq('status', 'ringing');
+  if (error) throw error;
+}
+
+export async function declineCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'declined' })
+    .eq('id', sessionId)
+    .eq('status', 'ringing');
+  if (error) throw error;
+}
+
+export async function endCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'ended' })
+    .eq('id', sessionId)
+    .in('status', ACTIVE_CALL_STATUSES);
+  if (error) throw error;
+}
+
+export function subscribeToCallSession(
+  sessionId: string,
+  onChange: (session: CallSession | null) => void,
+): () => void {
+  const channel = supabase
+    .channel(`call_session:${sessionId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'call_sessions', filter: `id=eq.${sessionId}` },
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          onChange(null);
+          return;
+        }
+        onChange(payload.new as CallSession);
+      },
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+export function subscribeToIncomingCallSessions(
+  userId: string,
+  onIncoming: (session: CallSession) => void,
+): () => void {
+  const channel = supabase
+    .channel(`incoming_calls:${userId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'call_sessions', filter: `callee_id=eq.${userId}` },
+      (payload) => {
+        const session = payload.new as CallSession;
+        if (session.status === 'ringing') {
+          onIncoming(session);
+        }
+      },
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+export async function requestCallToken(sessionId: string): Promise<CallTokenResponse> {
+  const { data, error } = await supabase.functions.invoke<CallTokenResponse>('create-call-token', {
+    body: { sessionId },
+  });
+  if (error) throw error;
+  if (!data) throw new Error('No call token response.');
+  return data;
+}

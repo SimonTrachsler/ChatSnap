@@ -11,9 +11,20 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "android": {
+      "package": "com.chatsnap.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.chatsnap.app"
+      "bundleIdentifier": "com.chatsnap.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Die App benoetigt Mikrofonzugriff fuer Audioanrufe."
+      }
     },
     "web": {
       "bundler": "metro",
@@ -25,7 +36,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Die App benÃ¶tigt Kamerazugriff, um Fotos aufzunehmen."
+          "cameraPermission": "Die App benoetigt Kamerazugriff, um Fotos aufzunehmen."
         }
       ]
     ]

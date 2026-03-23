@@ -3,14 +3,17 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initAuthListener, fetchProfileForUser } from '@/lib/supabase';
+import { subscribeToIncomingCallSessions } from '@/lib/calls';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useProfileStore } from '@/store/useProfileStore';
+import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { InAppToast } from '@/components/InAppToast';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
 import { StyleSheet, View } from 'react-native';
 import { colors } from '@/ui/theme';
 import { BackgroundDecor } from '@/ui/components/BackgroundDecor';
+import { STACK_TRANSITION_OPTIONS } from '@/ui/navigationTransitions';
 
 const LAYOUT_BG = colors.bg;
 type SafeRoute = '/' | '/welcome' | '/onboarding/bio';
@@ -28,10 +31,13 @@ function useSafeReplace() {
 }
 
 export default function RootLayout() {
+  const router = useRouter();
   const safeReplace = useSafeReplace();
   const { user, loading } = useAuthStore();
+  const refreshUnreadMessages = useInboxBadgeStore((s) => s.refreshUnreadMessages);
   const initialRedirectRef = useRef(false);
   const prevUserRef = useRef<typeof user | undefined>(undefined);
+  const lastIncomingCallRef = useRef<string | null>(null);
 
   // Auth gate: on app start getSession() runs in initAuthListener; store gets session or null
   useEffect(() => {
@@ -104,7 +110,34 @@ export default function RootLayout() {
     }
   }, [loading, profileLoading, user, profile, safeReplace]);
 
-  useInboxRealtime();
+  useInboxRealtime(refreshUnreadMessages);
+
+  const pushIncomingCall = useCallback((incomingSessionId: string) => {
+    if (!incomingSessionId || lastIncomingCallRef.current === incomingSessionId) return;
+    lastIncomingCallRef.current = incomingSessionId;
+    try {
+      router.push(`/call/${incomingSessionId}`);
+    } catch {
+      setTimeout(() => {
+        try {
+          router.push(`/call/${incomingSessionId}`);
+        } catch {
+          // Ignore navigation retry failure.
+        }
+      }, 50);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      lastIncomingCallRef.current = null;
+      return;
+    }
+    return subscribeToIncomingCallSessions(userId, (incomingSession) => {
+      pushIncomingCall(incomingSession.id);
+    });
+  }, [pushIncomingCall, user?.id]);
 
   return (
     /* @ts-expect-error ErrorBoundary type incompatible with React 19 JSX */
@@ -117,6 +150,7 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: LAYOUT_BG },
+                ...STACK_TRANSITION_OPTIONS,
               }}
             >
               <Stack.Screen name="(tabs)" />
@@ -125,6 +159,7 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
               <Stack.Screen name="register" />
               <Stack.Screen name="snap/[id]" />
+              <Stack.Screen name="call/[sessionId]" />
               <Stack.Screen name="onboarding/bio" options={{ gestureEnabled: false }} />
               <Stack.Screen name="onboarding/avatar" options={{ gestureEnabled: false }} />
             </Stack>

@@ -1,23 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFriendRequestsStore } from '@/store/useFriendRequestsStore';
+import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
 import { useProfileStore } from '@/store/useProfileStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { supabase } from '@/lib/supabase';
 import { colors, radius, shadows } from '@/ui/theme';
 import { getFloatingTabBarMetrics } from '@/ui/tabBar';
+import { TABS_TRANSITION_OPTIONS } from '@/ui/navigationTransitions';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const pendingIncomingCount = useFriendRequestsStore((s) => s.pendingIncomingCount);
   const refreshPendingIncoming = useFriendRequestsStore((s) => s.refreshPendingIncoming);
+  const unreadMessages = useInboxBadgeStore((s) => s.unreadMessages);
+  const refreshUnreadMessages = useInboxBadgeStore((s) => s.refreshUnreadMessages);
+  const setUnreadMessages = useInboxBadgeStore((s) => s.setUnreadMessages);
   const profileError = useProfileStore((s) => s.profileError);
   const profileLoading = useProfileStore((s) => s.profileLoading);
   const userId = useAuthStore((s) => s.user?.id) ?? null;
-  const [unreadMessages, setUnreadMessages] = useState(0);
   const tabBarMetrics = getFloatingTabBarMetrics(insets);
 
   const refreshInboxBadge = useCallback(async () => {
@@ -26,9 +30,8 @@ export default function TabsLayout() {
       return;
     }
     await refreshPendingIncoming();
-    const { data } = await supabase.rpc('count_unread_messages');
-    setUnreadMessages(typeof data === 'number' ? data : 0);
-  }, [userId, refreshPendingIncoming]);
+    await refreshUnreadMessages();
+  }, [userId, refreshPendingIncoming, refreshUnreadMessages, setUnreadMessages]);
 
   useEffect(() => { refreshPendingIncoming(); }, [refreshPendingIncoming]);
   useEffect(() => { refreshInboxBadge(); }, [refreshInboxBadge]);
@@ -73,6 +76,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        ...TABS_TRANSITION_OPTIONS,
         sceneStyle: {
           backgroundColor: 'transparent',
         },

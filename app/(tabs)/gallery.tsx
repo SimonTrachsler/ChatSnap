@@ -23,13 +23,12 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { EmptyState } from '@/ui/components/EmptyState';
 import { PageHeader } from '@/ui/components/PageHeader';
 import { colors, radius } from '@/ui/theme';
-import { getUserPhotoDisplayUri, getUserPhotoStoragePath } from '@/lib/userPhotos';
+import { getUserPhotoStoragePath } from '@/lib/userPhotos';
 
 type UserPhoto = {
   id: string;
   created_at: string;
-  storage_path?: string | null;
-  image_url?: string | null;
+  storage_path: string;
 };
 
 const USER_PHOTOS_BUCKET = 'user-photos';
@@ -54,7 +53,7 @@ export default function GalleryScreen() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const selectedPhotoUri = selectedPhoto ? (urls[selectedPhoto.id] ?? getUserPhotoDisplayUri(selectedPhoto)) : null;
+  const selectedPhotoUri = selectedPhoto ? (urls[selectedPhoto.id] ?? null) : null;
 
   const loadGallery = useCallback(async () => {
     if (!userId) {
@@ -73,7 +72,7 @@ export default function GalleryScreen() {
     try {
       const { data, error: fetchError } = await supabase
         .from('user_photos')
-        .select('*')
+        .select('id, created_at, storage_path')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (fetchError) {
@@ -84,14 +83,11 @@ export default function GalleryScreen() {
       const urlEntries = await Promise.all(
         list.map(async (photo) => {
           const storagePath = getUserPhotoStoragePath(photo);
-          if (storagePath) {
-            const { data: signedData } = await supabase.storage
-              .from(USER_PHOTOS_BUCKET)
-              .createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
-            if (signedData?.signedUrl) return [photo.id, signedData.signedUrl] as const;
-          }
-          const directUri = getUserPhotoDisplayUri(photo);
-          return directUri ? ([photo.id, directUri] as const) : null;
+          if (!storagePath) return null;
+          const { data: signedData } = await supabase.storage
+            .from(USER_PHOTOS_BUCKET)
+            .createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
+          return signedData?.signedUrl ? ([photo.id, signedData.signedUrl] as const) : null;
         }),
       );
       const displayUrls = Object.fromEntries(urlEntries.filter((entry): entry is readonly [string, string] => entry != null));
@@ -121,8 +117,6 @@ export default function GalleryScreen() {
           if (storagePath) {
             const { data: signedData } = await supabase.storage.from(USER_PHOTOS_BUCKET).createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
             signedUrl = signedData?.signedUrl ?? null;
-          } else {
-            signedUrl = getUserPhotoDisplayUri(row);
           }
           startTransition(() => {
             setPhotos((prev) => [row, ...prev]);
@@ -149,7 +143,7 @@ export default function GalleryScreen() {
 
   const handleSendToFriend = useCallback(() => {
     if (!selectedPhoto) return;
-    const imageUri = urls[selectedPhoto.id] ?? getUserPhotoDisplayUri(selectedPhoto);
+    const imageUri = urls[selectedPhoto.id] ?? null;
     if (!imageUri) { setModalError('Image URL not available.'); return; }
     setPendingGalleryUri(imageUri);
     closePreview();
@@ -223,7 +217,7 @@ export default function GalleryScreen() {
           />
         }
         renderItem={({ item }: { item: UserPhoto }) => {
-          const uri = urls[item.id] ?? getUserPhotoDisplayUri(item);
+          const uri = urls[item.id] ?? null;
           return (
             <TouchableOpacity
               style={[styles.cell, { width: itemSize, height: itemSize }]}

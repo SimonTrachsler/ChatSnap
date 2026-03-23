@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -15,6 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
+import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
+import { createOutgoingCallSession } from '@/lib/calls';
 import {
   canOpenChatWithUser,
   getOrCreateThread,
@@ -29,6 +33,7 @@ import { supabase } from '@/lib/supabase';
 import { supabaseErrorToUserMessage } from '@/lib/supabaseErrors';
 import { Avatar } from '@/ui/components/Avatar';
 import { colors, radius, spacing } from '@/ui/theme';
+import { getFloatingTabBarMetrics } from '@/ui/tabBar';
 
 type ScrollableListRef = { scrollToEnd?: (options: { animated?: boolean }) => void };
 const CHAT_NOT_FRIENDS_MESSAGE = 'Chat is only available for friends.';
@@ -59,8 +64,10 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   const friendId = normalizeUserIdParam(params.userId);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tabBarMetrics = getFloatingTabBarMetrics(insets);
   const myId = useAuthStore((s) => s.user?.id) ?? null;
   const setActiveThreadId = useActiveThreadStore((s) => s.setActiveThreadId);
+  const refreshUnreadMessages = useInboxBadgeStore((s) => s.refreshUnreadMessages);
 
   const [username, setUsername] = useState<string | null>(null);
   const [friendAvatar, setFriendAvatar] = useState<string | null>(null);
@@ -71,6 +78,8 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const listRef = useRef<React.ElementRef<typeof FlatList>>(null);
   const loadRequestRef = useRef(0);
@@ -144,7 +153,9 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
       const list = await listMessages(tid);
       if (isStale()) return;
       setMessages(list);
-      markThreadRead(tid).catch(() => {});
+      markThreadRead(tid)
+        .then(() => refreshUnreadMessages())
+        .catch(() => {});
     } catch (error) {
       if (isStale()) return;
       if (!isOnlyFriendsChatError(error)) {
@@ -161,7 +172,7 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     } finally {
       if (!isStale()) setLoading(false);
     }
-  }, [friendId, handleBack, myId, setActiveThreadId]);
+  }, [friendId, handleBack, myId, refreshUnreadMessages, setActiveThreadId]);
 
   useEffect(() => {
     loadThreadAndMessages();
@@ -179,17 +190,34 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
         return [...prev, msg].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       });
       if (msg.sender_id !== myId) {
-        markThreadRead(threadId).catch(() => {});
+        markThreadRead(threadId)
+          .then(() => refreshUnreadMessages())
+          .catch(() => {});
       }
     });
     return unsub;
-  }, [myId, threadId]);
+  }, [myId, refreshUnreadMessages, threadId]);
 
   useEffect(() => {
     if (messages.length > 0) {
       (listRef.current as ScrollableListRef | null)?.scrollToEnd?.({ animated: true });
     }
   }, [messages.length]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;
+  const composerBottomPadding = keyboardVisible ? 3 : Math.max(10, insets.bottom + 4);
+  const listBottomPadding = composerBottomOffset + 86;
 
   const sendMessage = async () => {
     const body = input.trim();
@@ -225,11 +253,25 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     }
   };
 
+  const handleStartCall = useCallback(async () => {
+    if (!friendId || !myId || startingCall) return;
+    setStartingCall(true);
+    try {
+      const session = await createOutgoingCallSession(friendId);
+      router.push(`/call/${session.id}`);
+    } catch (error) {
+      Alert.alert('Call failed', supabaseErrorToUserMessage(error));
+    } finally {
+      setStartingCall(false);
+    }
+  }, [friendId, myId, router, startingCall]);
+
   const renderItem = useCallback(
     ({ item }: { item: ChatMessage }): React.ReactElement => {
       const isSent = item.sender_id === myId;
       const isSnap = item.message_type === 'snap' && item.snap_id;
       const isOpenedSnap = isSnap && item.snapOpened;
+      const snapLabel = isSent ? 'Snap sent' : 'Open snap';
       return (
         <View style={[styles.bubbleWrap, isSent ? styles.bubbleWrapSent : styles.bubbleWrapReceived]}>
           {isSnap ? (
@@ -244,11 +286,12 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
             ) : (
               <TouchableOpacity
                 style={[styles.snapBubble, isSent ? styles.bubbleSent : styles.bubbleReceived]}
-                onPress={() => router.push(`/snap/${item.snap_id}`)}
-                activeOpacity={0.8}
+                onPress={isSent ? undefined : () => router.push(`/snap/${item.snap_id}`)}
+                disabled={isSent}
+                activeOpacity={isSent ? 1 : 0.8}
               >
-                <Ionicons name="camera" size={20} color={isSent ? colors.textPrimary : colors.accentSecondary} />
-                <Text style={[styles.snapBubbleText, isSent && styles.bubbleTextSent]}>Open snap</Text>
+                <Ionicons name="camera" size={20} color={isSent ? colors.textMuted : colors.accentSecondary} />
+                <Text style={[styles.snapBubbleText, isSent && styles.snapBubbleTextDisabled]}>{snapLabel}</Text>
                 <Text style={[styles.bubbleTime, isSent ? styles.bubbleTimeSent : styles.bubbleTimeReceived]}>
                   {formatTime(item.created_at)}
                 </Text>
@@ -294,7 +337,7 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
+      keyboardVerticalOffset={0}
     >
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.82}>
@@ -319,7 +362,18 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
             </Text>
           </View>
         )}
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={[styles.callBtn, (!friendId || startingCall) && styles.callBtnDisabled]}
+          onPress={handleStartCall}
+          disabled={!friendId || startingCall}
+          activeOpacity={0.82}
+        >
+          {startingCall ? (
+            <ActivityIndicator size="small" color={colors.textPrimary} />
+          ) : (
+            <Ionicons name="call-outline" size={20} color={colors.textPrimary} />
+          )}
+        </TouchableOpacity>
       </View>
       {loading ? (
         <View style={styles.loadingWrap}>
@@ -331,7 +385,7 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
           data={messages}
           keyExtractor={(item: ChatMessage) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
           style={styles.list}
           initialNumToRender={16}
           windowSize={8}
@@ -351,13 +405,15 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
           <Text style={styles.sendErrorText}>{sendError}</Text>
         </View>
       ) : null}
-      <View style={[styles.inputRow, { paddingBottom: Math.max(12, insets.bottom + 4) }]}>
+      <View style={[styles.inputRow, { marginBottom: composerBottomOffset, paddingBottom: composerBottomPadding }]}>
         <TextInput
           style={styles.input}
           placeholder="Message..."
           placeholderTextColor={colors.textMuted}
           value={input}
           onChangeText={setInput}
+          onFocus={() => setKeyboardVisible(true)}
+          onBlur={() => setKeyboardVisible(false)}
           multiline
           maxLength={2000}
           editable={!sending && !!threadId}
@@ -404,11 +460,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.bgCardAlt,
   },
+  callBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgCardAlt,
+    borderWidth: 1,
+    borderColor: colors.bgCardBorder,
+  },
+  callBtnDisabled: {
+    opacity: 0.55,
+  },
   headerProfile: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, minWidth: 0 },
   headerSpacer: { width: 40 },
   title: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.textPrimary },
   list: { flex: 1 },
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 8 },
+  listContent: { paddingHorizontal: spacing.lg },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyWrap: { paddingVertical: 48, alignItems: 'center', gap: 8 },
   emptyText: { fontSize: 14, color: colors.textMuted },
@@ -440,6 +509,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   snapBubbleText: { fontSize: 14, fontWeight: '700', color: colors.accentSecondary },
+  snapBubbleTextDisabled: { color: colors.textMuted },
   snapBubbleTextOpened: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
   bubbleTime: { fontSize: 11, marginTop: 4 },
   bubbleTimeSent: { color: 'rgba(248,250,252,0.78)' },
@@ -456,7 +526,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     marginHorizontal: spacing.lg,
-    marginBottom: 18,
     padding: 10,
     backgroundColor: colors.bgCard,
     borderWidth: 1,

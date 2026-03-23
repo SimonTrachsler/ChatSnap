@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { colors } from '@/ui/theme';
+import { STACK_TRANSITION_OPTIONS } from '@/ui/navigationTransitions';
 
 export default function InboxLayout() {
   return (
@@ -9,6 +10,7 @@ export default function InboxLayout() {
         contentStyle: {
           backgroundColor: colors.bg,
         },
+        ...STACK_TRANSITION_OPTIONS,
       }}
     >
       <Stack.Screen name="index" />
