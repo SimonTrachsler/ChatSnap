@@ -218,39 +218,39 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshCallReadiness = useCallback(async (forceRefresh = false) => {
     if (!friendId || !myId) {
       setCallReady(false);
       setCallReadyMessage('Audio calls are unavailable.');
       setCheckingCallReadiness(false);
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     setCheckingCallReadiness(true);
-    probeCallReadiness()
-      .then((readiness) => {
-        if (cancelled) return;
-        setCallReady(readiness.success);
-        setCallReadyMessage(readiness.message ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCallReady(false);
-        setCallReadyMessage('Could not verify audio call configuration.');
-      })
+    try {
+      const readiness = await probeCallReadiness({ forceRefresh });
+      setCallReady(readiness.success);
+      setCallReadyMessage(readiness.message ?? null);
+    } catch {
+      setCallReady(false);
+      setCallReadyMessage('Could not verify audio call configuration.');
+    } finally {
+      setCheckingCallReadiness(false);
+    }
+  }, [friendId, myId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    refreshCallReadiness(false)
+      .catch(() => {})
       .finally(() => {
-        if (!cancelled) {
-          setCheckingCallReadiness(false);
-        }
+        if (cancelled) return;
       });
 
     return () => {
       cancelled = true;
     };
-  }, [friendId, myId]);
+  }, [refreshCallReadiness]);
 
   const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;
   const composerBottomPadding = keyboardVisible ? 3 : Math.max(10, insets.bottom + 4);
@@ -417,12 +417,19 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
         </TouchableOpacity>
       </View>
       {!checkingCallReadiness && !callReady && callReadyMessage ? (
-        <View style={styles.callInfoBar}>
+        <TouchableOpacity
+          style={styles.callInfoBar}
+          activeOpacity={0.85}
+          onPress={() => {
+            refreshCallReadiness(true).catch(() => {});
+          }}
+        >
           <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
           <Text style={styles.callInfoText} numberOfLines={2}>
             {callReadyMessage}
           </Text>
-        </View>
+          <Ionicons name="refresh-outline" size={13} color={colors.textMuted} />
+        </TouchableOpacity>
       ) : null}
       {loading ? (
         <View style={styles.loadingWrap}>
