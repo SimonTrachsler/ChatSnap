@@ -84,12 +84,16 @@ export async function createOutgoingCallSession(calleeId: string): Promise<CallS
     .single();
   if (error) {
     const postgresCode = (error as { code?: string }).code;
+    const errorMessage = (error as { message?: string }).message?.toLowerCase() ?? '';
     if (postgresCode === '23505') {
       const existing = await findLatestActiveSession(threadId);
       if (existing) {
         return existing;
       }
       throw new Error('A call with this friend is already active.');
+    }
+    if (errorMessage.includes('already in an active call')) {
+      throw new Error('One of you is already in another active call.');
     }
     throw error;
   }

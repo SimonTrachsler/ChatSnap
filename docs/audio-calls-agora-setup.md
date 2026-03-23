@@ -60,6 +60,10 @@ The app probes call readiness before enabling the call button:
 - `AGORA_APP_ID` present, missing `AGORA_APP_CERTIFICATE`: calls are enabled in debug mode (no secure token).
 - Both present: calls are fully enabled with secure token generation.
 
+Call session constraints:
+
+- A user can only be part of one active call (`ringing` or `accepted`) at a time.
+
 ## 7) End-to-end token flow check (local)
 
 Use this after deployment to verify that the full flow works (`auth -> thread -> call_session -> edge function token`):
@@ -81,6 +85,20 @@ Use this to verify status transition guards (caller cannot self-accept; callee c
 
 ```bash
 npm run verify:call-status-guards
+```
+
+Required local env vars:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+## 9) Single-active-call-per-user guard check (local)
+
+Use this to verify that users cannot start a second active call while already in one:
+
+```bash
+npm run verify:call-single-active-user-guard
 ```
 
 Required local env vars:
