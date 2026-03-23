@@ -196,7 +196,7 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
               <Stack.Screen name="register" />
               <Stack.Screen name="snap/[id]" />
-              <Stack.Screen name="call/[sessionId]" />
+              <Stack.Screen name="call/[sessionId]" options={{ gestureEnabled: false }} />
               <Stack.Screen name="onboarding/bio" options={{ gestureEnabled: false }} />
               <Stack.Screen name="onboarding/avatar" options={{ gestureEnabled: false }} />
             </Stack>

@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -88,6 +88,7 @@ export default function CallSessionScreen() {
   const params = useLocalSearchParams<{ sessionId?: string | string[] }>();
   const sessionId = resolveSessionId(params.sessionId);
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const myId = useAuthStore((s) => s.user?.id) ?? null;
 
@@ -106,6 +107,7 @@ export default function CallSessionScreen() {
   const eventHandlerRef = useRef<IRtcEngineEventHandler | null>(null);
   const joinedRef = useRef(false);
   const joinInProgressRef = useRef(false);
+  const skipBeforeRemoveRef = useRef(false);
 
   const leaveRtc = useCallback(() => {
     const engine = engineRef.current;
@@ -358,6 +360,7 @@ export default function CallSessionScreen() {
         .finally(() => {
           if (!cancelled) {
             leaveRtc();
+            skipBeforeRemoveRef.current = true;
             router.back();
           }
         });
@@ -394,6 +397,7 @@ export default function CallSessionScreen() {
     try {
       await declineCallSession(session.id);
       leaveRtc();
+      skipBeforeRemoveRef.current = true;
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not decline call.');
@@ -409,6 +413,7 @@ export default function CallSessionScreen() {
     try {
       await endCallSession(session.id);
       leaveRtc();
+      skipBeforeRemoveRef.current = true;
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not end call.');
@@ -417,13 +422,12 @@ export default function CallSessionScreen() {
     }
   }, [busy, leaveRtc, router, session?.id]);
 
-  const handleBack = useCallback(async () => {
-    if (busy) return;
+  const finalizeBeforeExit = useCallback(async () => {
     if (!session?.id) {
       leaveRtc();
-      router.back();
       return;
     }
+
     if (session.status === 'accepted') {
       try {
         await endCallSession(session.id);
@@ -438,12 +442,45 @@ export default function CallSessionScreen() {
           await declineCallSession(session.id);
         }
       } catch {
-        // Ignore and still navigate away.
+        // Ignore and still leave the screen.
       }
     }
+
     leaveRtc();
-    router.back();
-  }, [busy, leaveRtc, myId, router, session]);
+  }, [leaveRtc, myId, session]);
+
+  const handleBack = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await finalizeBeforeExit();
+      skipBeforeRemoveRef.current = true;
+      router.back();
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, finalizeBeforeExit, router]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (skipBeforeRemoveRef.current) {
+        skipBeforeRemoveRef.current = false;
+        return;
+      }
+      if (!session || TERMINAL_STATUSES.has(session.status)) {
+        leaveRtc();
+        return;
+      }
+
+      event.preventDefault();
+      void (async () => {
+        await finalizeBeforeExit();
+        skipBeforeRemoveRef.current = true;
+        navigation.dispatch(event.data.action);
+      })();
+    });
+    return unsubscribe;
+  }, [finalizeBeforeExit, leaveRtc, navigation, session]);
 
   const toggleMute = useCallback(() => {
     const engine = engineRef.current;
@@ -478,7 +515,7 @@ export default function CallSessionScreen() {
     return (
       <View style={styles.loadingWrap}>
         <Text style={styles.errorText}>{error ?? 'Call unavailable.'}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.82}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack} activeOpacity={0.82}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
       </View>
