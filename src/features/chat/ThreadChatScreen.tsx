@@ -79,6 +79,9 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [startingCall, setStartingCall] = useState(false);
+  const [callReady, setCallReady] = useState<boolean>(true);
+  const [callReadyMessage, setCallReadyMessage] = useState<string | null>(null);
+  const [checkingCallReadiness, setCheckingCallReadiness] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const listRef = useRef<React.ElementRef<typeof FlatList>>(null);
@@ -215,6 +218,40 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!friendId || !myId) {
+      setCallReady(false);
+      setCallReadyMessage('Audio calls are unavailable.');
+      setCheckingCallReadiness(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setCheckingCallReadiness(true);
+    probeCallReadiness()
+      .then((readiness) => {
+        if (cancelled) return;
+        setCallReady(readiness.success);
+        setCallReadyMessage(readiness.message ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCallReady(false);
+        setCallReadyMessage('Could not verify audio call configuration.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCheckingCallReadiness(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [friendId, myId]);
+
   const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;
   const composerBottomPadding = keyboardVisible ? 3 : Math.max(10, insets.bottom + 4);
   const listBottomPadding = composerBottomOffset + 86;
@@ -254,17 +291,13 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   };
 
   const handleStartCall = useCallback(async () => {
-    if (!friendId || !myId || startingCall) return;
+    if (!friendId || !myId || startingCall || checkingCallReadiness) return;
+    if (!callReady) {
+      Alert.alert('Audio call unavailable', callReadyMessage ?? 'Audio calls are not configured yet.');
+      return;
+    }
     setStartingCall(true);
     try {
-      const readiness = await probeCallReadiness();
-      if (!readiness.success) {
-        Alert.alert(
-          'Audio call unavailable',
-          readiness.message ?? 'Audio calls are not configured yet.',
-        );
-        return;
-      }
       const session = await createOutgoingCallSession(friendId);
       router.push(`/call/${session.id}`);
     } catch (error) {
@@ -272,7 +305,7 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     } finally {
       setStartingCall(false);
     }
-  }, [friendId, myId, router, startingCall]);
+  }, [callReady, callReadyMessage, checkingCallReadiness, friendId, myId, router, startingCall]);
 
   const renderItem = useCallback(
     ({ item }: { item: ChatMessage }): React.ReactElement => {
@@ -371,12 +404,12 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
           </View>
         )}
         <TouchableOpacity
-          style={[styles.callBtn, (!friendId || startingCall) && styles.callBtnDisabled]}
+          style={[styles.callBtn, (!friendId || startingCall || checkingCallReadiness || !callReady) && styles.callBtnDisabled]}
           onPress={handleStartCall}
-          disabled={!friendId || startingCall}
+          disabled={!friendId || startingCall || checkingCallReadiness || !callReady}
           activeOpacity={0.82}
         >
-          {startingCall ? (
+          {startingCall || checkingCallReadiness ? (
             <ActivityIndicator size="small" color={colors.textPrimary} />
           ) : (
             <Ionicons name="call-outline" size={20} color={colors.textPrimary} />
