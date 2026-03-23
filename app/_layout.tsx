@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initAuthListener, fetchProfileForUser } from '@/lib/supabase';
-import { subscribeToIncomingCallSessions } from '@/lib/calls';
+import { subscribeToIncomingCallSessions, sweepAndGetLatestIncomingRingingCallSession } from '@/lib/calls';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useProfileStore } from '@/store/useProfileStore';
 import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
@@ -128,16 +128,30 @@ export default function RootLayout() {
     }
   }, [router]);
 
+  const checkPendingIncomingCall = useCallback(async () => {
+    const userId = user?.id;
+    if (!userId) return;
+    try {
+      const pendingSession = await sweepAndGetLatestIncomingRingingCallSession(userId);
+      if (pendingSession?.id) {
+        pushIncomingCall(pendingSession.id);
+      }
+    } catch (error) {
+      console.warn('[calls] pending incoming check failed', error);
+    }
+  }, [pushIncomingCall, user?.id]);
+
   useEffect(() => {
     const userId = user?.id;
     if (!userId) {
       lastIncomingCallRef.current = null;
       return;
     }
+    void checkPendingIncomingCall();
     return subscribeToIncomingCallSessions(userId, (incomingSession) => {
       pushIncomingCall(incomingSession.id);
     });
-  }, [pushIncomingCall, user?.id]);
+  }, [checkPendingIncomingCall, pushIncomingCall, user?.id]);
 
   return (
     /* @ts-expect-error ErrorBoundary type incompatible with React 19 JSX */

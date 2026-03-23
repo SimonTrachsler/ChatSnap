@@ -20,6 +20,7 @@ import {
 } from 'react-native-agora';
 import {
   acceptCallSession,
+  CALL_RING_TIMEOUT_MS,
   cancelCallSession,
   declineCallSession,
   endCallSession,
@@ -36,7 +37,6 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { colors, radius, spacing } from '@/ui/theme';
 
 const TERMINAL_STATUSES = new Set(['declined', 'missed', 'cancelled', 'failed', 'ended']);
-const RING_TIMEOUT_MS = 35_000;
 
 function resolveSessionId(value: string | string[] | undefined): string | null {
   if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -345,7 +345,7 @@ export default function CallSessionScreen() {
     const createdAtMs = new Date(session.created_at).getTime();
     if (!Number.isFinite(createdAtMs)) return;
 
-    const deadlineMs = createdAtMs + RING_TIMEOUT_MS;
+    const deadlineMs = createdAtMs + CALL_RING_TIMEOUT_MS;
     const remainingMs = Math.max(0, deadlineMs - Date.now());
     let cancelled = false;
 

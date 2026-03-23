@@ -19,7 +19,8 @@ export type CallTokenResponse = {
 };
 
 const ACTIVE_CALL_STATUSES = ['ringing', 'accepted'];
-const STALE_RINGING_MS = 90_000;
+export const CALL_RING_TIMEOUT_MS = 35_000;
+const STALE_RINGING_MS = CALL_RING_TIMEOUT_MS + 5_000;
 const CALL_READINESS_CACHE_MS = 60_000;
 let callReadinessCache: { value: CallTokenResponse; expiresAt: number } | null = null;
 
@@ -100,6 +101,30 @@ export async function getCallSession(sessionId: string): Promise<CallSession | n
   const { data, error } = await (supabase.from('call_sessions') as any)
     .select('*')
     .eq('id', sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as CallSession | null) ?? null;
+}
+
+export async function sweepAndGetLatestIncomingRingingCallSession(userId: string): Promise<CallSession | null> {
+  const staleBeforeIso = new Date(Date.now() - CALL_RING_TIMEOUT_MS).toISOString();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const sweep = await (supabase.from('call_sessions') as any)
+    .update({ status: 'missed' })
+    .eq('callee_id', userId)
+    .eq('status', 'ringing')
+    .lt('created_at', staleBeforeIso);
+  if (sweep.error) throw sweep.error;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for selects is narrower than runtime schema
+  const { data, error } = await (supabase.from('call_sessions') as any)
+    .select('*')
+    .eq('callee_id', userId)
+    .eq('status', 'ringing')
+    .gte('created_at', staleBeforeIso)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return (data as CallSession | null) ?? null;
