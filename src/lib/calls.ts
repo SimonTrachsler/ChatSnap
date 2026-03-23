@@ -1,5 +1,5 @@
 import { getOrCreateThread } from '@/lib/chat';
-import { supabase } from '@/lib/supabase';
+import { callRpc, supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 
 type CallSessionRow = Database['public']['Tables']['call_sessions']['Row'];
@@ -18,6 +18,23 @@ export type CallTokenResponse = {
   message?: string;
 };
 
+export type CallAvailabilityReason =
+  | 'available'
+  | 'already_with_you'
+  | 'you_busy'
+  | 'target_busy'
+  | 'not_friends'
+  | 'self'
+  | 'not_authenticated'
+  | 'missing_target'
+  | 'unknown';
+
+export type CallAvailabilityResponse = {
+  available: boolean;
+  reason: CallAvailabilityReason;
+  message: string | null;
+};
+
 const ACTIVE_CALL_STATUSES = ['ringing', 'accepted'];
 export const CALL_RING_TIMEOUT_MS = 35_000;
 const STALE_RINGING_MS = CALL_RING_TIMEOUT_MS + 5_000;
@@ -34,6 +51,29 @@ async function requireMyUserId(): Promise<string> {
 
 function makeRtcChannel(threadId: string): string {
   return `call-${threadId}-${Date.now()}`;
+}
+
+function availabilityReasonToMessage(reason: CallAvailabilityReason): string | null {
+  switch (reason) {
+    case 'available':
+      return null;
+    case 'already_with_you':
+      return 'You already have an active call with this friend.';
+    case 'you_busy':
+      return 'You are already in another active call.';
+    case 'target_busy':
+      return 'This friend is currently in another active call.';
+    case 'not_friends':
+      return 'Audio calls are only available with friends.';
+    case 'self':
+      return 'You cannot call yourself.';
+    case 'not_authenticated':
+      return 'You need to sign in again to start calls.';
+    case 'missing_target':
+      return 'Missing call target.';
+    default:
+      return 'Could not verify call availability.';
+  }
 }
 
 async function expireStaleRingingCalls(threadId: string): Promise<void> {
@@ -242,6 +282,35 @@ export async function requestCallToken(sessionId: string): Promise<CallTokenResp
   if (error) throw error;
   if (!data) throw new Error('No call token response.');
   return data;
+}
+
+export async function getCallAvailability(targetUserId: string): Promise<CallAvailabilityResponse> {
+  const { data, error } = await callRpc<Array<{ available?: boolean | null; reason?: string | null }>>(
+    'get_call_availability',
+    { p_target_user_id: targetUserId },
+  );
+  if (error) throw error;
+
+  const row = Array.isArray(data) ? (data[0] ?? null) : null;
+  const available = row?.available === true;
+  const rawReason = typeof row?.reason === 'string' ? row.reason : null;
+  const knownReasons: ReadonlySet<string> = new Set([
+    'available',
+    'already_with_you',
+    'you_busy',
+    'target_busy',
+    'not_friends',
+    'self',
+    'not_authenticated',
+    'missing_target',
+  ]);
+  const reason = ((rawReason && knownReasons.has(rawReason) ? rawReason : 'unknown') as CallAvailabilityReason);
+
+  return {
+    available,
+    reason,
+    message: availabilityReasonToMessage(reason),
+  };
 }
 
 export async function probeCallReadiness(options?: { forceRefresh?: boolean }): Promise<CallTokenResponse> {

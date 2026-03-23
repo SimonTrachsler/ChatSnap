@@ -251,6 +251,10 @@ export interface Database {
         Args: { other_user_id: string };
         Returns: string;
       };
+      get_call_availability: {
+        Args: { p_target_user_id: string };
+        Returns: { available: boolean; reason: string }[];
+      };
       mark_thread_read: {
         Args: { p_thread_id: string };
         Returns: void;

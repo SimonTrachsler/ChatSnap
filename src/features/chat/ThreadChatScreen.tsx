@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
 import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
-import { createOutgoingCallSession, probeCallReadiness } from '@/lib/calls';
+import { createOutgoingCallSession, getCallAvailability, probeCallReadiness } from '@/lib/calls';
 import {
   canOpenChatWithUser,
   getOrCreateThread,
@@ -81,7 +81,10 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   const [startingCall, setStartingCall] = useState(false);
   const [callReady, setCallReady] = useState<boolean>(true);
   const [callReadyMessage, setCallReadyMessage] = useState<string | null>(null);
+  const [callAvailable, setCallAvailable] = useState<boolean>(true);
+  const [callAvailabilityMessage, setCallAvailabilityMessage] = useState<string | null>(null);
   const [checkingCallReadiness, setCheckingCallReadiness] = useState(false);
+  const [checkingCallAvailability, setCheckingCallAvailability] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const listRef = useRef<React.ElementRef<typeof FlatList>>(null);
@@ -218,43 +221,99 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     };
   }, []);
 
-  const refreshCallReadiness = useCallback(async (forceRefresh = false) => {
-    if (!friendId || !myId) {
-      setCallReady(false);
-      setCallReadyMessage('Audio calls are unavailable.');
-      setCheckingCallReadiness(false);
-      return;
-    }
+  type CallStateSnapshot = {
+    readiness: boolean;
+    readinessMessage: string | null;
+    availability: boolean;
+    availabilityMessage: string | null;
+  };
 
-    setCheckingCallReadiness(true);
-    try {
-      const readiness = await probeCallReadiness({ forceRefresh });
-      setCallReady(readiness.success);
-      setCallReadyMessage(readiness.message ?? null);
-    } catch {
-      setCallReady(false);
-      setCallReadyMessage('Could not verify audio call configuration.');
-    } finally {
-      setCheckingCallReadiness(false);
-    }
-  }, [friendId, myId]);
+  const refreshCallState = useCallback(
+    async (options?: { forceRefresh?: boolean; showLoading?: boolean }): Promise<CallStateSnapshot> => {
+      const forceRefresh = options?.forceRefresh === true;
+      const showLoading = options?.showLoading === true;
+
+      if (!friendId || !myId) {
+        const unavailableState: CallStateSnapshot = {
+          readiness: false,
+          readinessMessage: 'Audio calls are unavailable.',
+          availability: false,
+          availabilityMessage: 'Audio calls are unavailable.',
+        };
+        setCallReady(unavailableState.readiness);
+        setCallReadyMessage(unavailableState.readinessMessage);
+        setCallAvailable(unavailableState.availability);
+        setCallAvailabilityMessage(unavailableState.availabilityMessage);
+        setCheckingCallReadiness(false);
+        setCheckingCallAvailability(false);
+        return unavailableState;
+      }
+
+      if (showLoading) {
+        setCheckingCallReadiness(true);
+        setCheckingCallAvailability(true);
+      }
+
+      try {
+        const [readinessResult, availabilityResult] = await Promise.allSettled([
+          probeCallReadiness({ forceRefresh }),
+          getCallAvailability(friendId),
+        ]);
+
+        const nextState: CallStateSnapshot = {
+          readiness:
+            readinessResult.status === 'fulfilled'
+              ? readinessResult.value.success
+              : false,
+          readinessMessage:
+            readinessResult.status === 'fulfilled'
+              ? (readinessResult.value.message ?? null)
+              : 'Could not verify audio call configuration.',
+          availability:
+            availabilityResult.status === 'fulfilled'
+              ? availabilityResult.value.available
+              : false,
+          availabilityMessage:
+            availabilityResult.status === 'fulfilled'
+              ? availabilityResult.value.message
+              : 'Could not verify call availability.',
+        };
+
+        setCallReady(nextState.readiness);
+        setCallReadyMessage(nextState.readinessMessage);
+        setCallAvailable(nextState.availability);
+        setCallAvailabilityMessage(nextState.availabilityMessage);
+        return nextState;
+      } finally {
+        if (showLoading) {
+          setCheckingCallReadiness(false);
+          setCheckingCallAvailability(false);
+        }
+      }
+    },
+    [friendId, myId],
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    refreshCallReadiness(false)
-      .catch(() => {})
-      .finally(() => {
-        if (cancelled) return;
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshCallReadiness]);
+    void refreshCallState({ forceRefresh: false, showLoading: true });
+    if (!friendId || !myId) return;
+    const interval = setInterval(() => {
+      void refreshCallState({ forceRefresh: false, showLoading: false });
+    }, 12_000);
+    return () => clearInterval(interval);
+  }, [friendId, myId, refreshCallState]);
 
   const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;
   const composerBottomPadding = keyboardVisible ? 3 : Math.max(10, insets.bottom + 4);
   const listBottomPadding = composerBottomOffset + 86;
+  const checkingCallState = checkingCallReadiness || checkingCallAvailability;
+  const canStartCall =
+    !!friendId && !startingCall && !checkingCallState && callReady && callAvailable;
+  const callBlockedMessage = !callReady
+    ? callReadyMessage
+    : !callAvailable
+      ? callAvailabilityMessage
+      : null;
 
   const sendMessage = async () => {
     const body = input.trim();
@@ -291,13 +350,18 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   };
 
   const handleStartCall = useCallback(async () => {
-    if (!friendId || !myId || startingCall || checkingCallReadiness) return;
-    if (!callReady) {
-      Alert.alert('Audio call unavailable', callReadyMessage ?? 'Audio calls are not configured yet.');
-      return;
-    }
+    if (!friendId || !myId || startingCall || checkingCallState) return;
     setStartingCall(true);
     try {
+      const callState = await refreshCallState({ forceRefresh: true, showLoading: true });
+      if (!callState.readiness) {
+        Alert.alert('Audio call unavailable', callState.readinessMessage ?? 'Audio calls are not configured yet.');
+        return;
+      }
+      if (!callState.availability) {
+        Alert.alert('Audio call unavailable', callState.availabilityMessage ?? 'This call cannot be started right now.');
+        return;
+      }
       const session = await createOutgoingCallSession(friendId);
       router.push(`/call/${session.id}`);
     } catch (error) {
@@ -305,7 +369,7 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     } finally {
       setStartingCall(false);
     }
-  }, [callReady, callReadyMessage, checkingCallReadiness, friendId, myId, router, startingCall]);
+  }, [checkingCallState, friendId, myId, refreshCallState, router, startingCall]);
 
   const renderItem = useCallback(
     ({ item }: { item: ChatMessage }): React.ReactElement => {
@@ -404,29 +468,29 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
           </View>
         )}
         <TouchableOpacity
-          style={[styles.callBtn, (!friendId || startingCall || checkingCallReadiness || !callReady) && styles.callBtnDisabled]}
+          style={[styles.callBtn, !canStartCall && styles.callBtnDisabled]}
           onPress={handleStartCall}
-          disabled={!friendId || startingCall || checkingCallReadiness || !callReady}
+          disabled={!canStartCall}
           activeOpacity={0.82}
         >
-          {startingCall || checkingCallReadiness ? (
+          {startingCall || checkingCallState ? (
             <ActivityIndicator size="small" color={colors.textPrimary} />
           ) : (
             <Ionicons name="call-outline" size={20} color={colors.textPrimary} />
           )}
         </TouchableOpacity>
       </View>
-      {!checkingCallReadiness && !callReady && callReadyMessage ? (
+      {!checkingCallState && callBlockedMessage ? (
         <TouchableOpacity
           style={styles.callInfoBar}
           activeOpacity={0.85}
           onPress={() => {
-            refreshCallReadiness(true).catch(() => {});
+            refreshCallState({ forceRefresh: true, showLoading: true }).catch(() => {});
           }}
         >
           <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
           <Text style={styles.callInfoText} numberOfLines={2}>
-            {callReadyMessage}
+            {callBlockedMessage}
           </Text>
           <Ionicons name="refresh-outline" size={13} color={colors.textMuted} />
         </TouchableOpacity>

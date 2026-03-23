@@ -63,6 +63,7 @@ The app probes call readiness before enabling the call button:
 Call session constraints:
 
 - A user can only be part of one active call (`ringing` or `accepted`) at a time.
+- Chat pre-check uses `get_call_availability(...)` so the call button can be disabled with a clear reason (for example: friend busy in another call).
 
 ## 7) End-to-end token flow check (local)
 
@@ -107,7 +108,21 @@ Required local env vars:
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-Run both local checks together:
+## 10) Call availability RPC check (local)
+
+Use this to verify the friend-safe availability RPC (`available`, `already_with_you`, `target_busy`):
+
+```bash
+npm run verify:call-availability
+```
+
+Required local env vars:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Run all local call checks together:
 
 ```bash
 npm run verify:calls
