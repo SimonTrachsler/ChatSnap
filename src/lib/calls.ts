@@ -20,6 +20,8 @@ export type CallTokenResponse = {
 
 const ACTIVE_CALL_STATUSES = ['ringing', 'accepted'];
 const STALE_RINGING_MS = 90_000;
+const CALL_READINESS_CACHE_MS = 60_000;
+let callReadinessCache: { value: CallTokenResponse; expiresAt: number } | null = null;
 
 async function requireMyUserId(): Promise<string> {
   const { data: { user }, error } = await supabase.auth.getUser();
@@ -204,11 +206,20 @@ export async function requestCallToken(sessionId: string): Promise<CallTokenResp
   return data;
 }
 
-export async function probeCallReadiness(): Promise<CallTokenResponse> {
+export async function probeCallReadiness(options?: { forceRefresh?: boolean }): Promise<CallTokenResponse> {
+  const forceRefresh = options?.forceRefresh === true;
+  if (!forceRefresh && callReadinessCache && Date.now() < callReadinessCache.expiresAt) {
+    return callReadinessCache.value;
+  }
+
   const { data, error } = await supabase.functions.invoke<CallTokenResponse>('create-call-token', {
     body: { probe: true },
   });
   if (error) throw error;
   if (!data) throw new Error('No call readiness response.');
+  callReadinessCache = {
+    value: data,
+    expiresAt: Date.now() + CALL_READINESS_CACHE_MS,
+  };
   return data;
 }
