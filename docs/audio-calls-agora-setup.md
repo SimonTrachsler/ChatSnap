@@ -18,13 +18,16 @@ supabase secrets set AGORA_APP_CERTIFICATE=YOUR_AGORA_APP_CERTIFICATE
 supabase secrets set AGORA_TOKEN_TTL_SECONDS=3600
 ```
 
+`AGORA_APP_ID` is required.
 `AGORA_APP_CERTIFICATE` can be omitted for debug mode, but production should always use it.
 
 ## 3) Deploy Edge Function
 
 ```bash
-supabase functions deploy create-call-token
+supabase functions deploy create-call-token --no-verify-jwt
 ```
+
+`create-call-token` verifies the user JWT inside the function, so gateway JWT verification should stay disabled for this function.
 
 ## 4) Rebuild native app
 
@@ -42,3 +45,10 @@ npx expo run:android
 3. Callee taps `Accept`, both users join Agora audio.
 4. Use `Mute`, `Speaker`, and `End` controls in the call screen.
 
+## 6) Readiness check behavior
+
+The app probes call readiness before enabling the call button:
+
+- Missing `AGORA_APP_ID`: calls are disabled.
+- `AGORA_APP_ID` present, missing `AGORA_APP_CERTIFICATE`: calls are enabled in debug mode (no secure token).
+- Both present: calls are fully enabled with secure token generation.
