@@ -13,7 +13,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json}\"",
     "prepare-assets": "node scripts/init-assets.js",
     "supabase:set-agora-secrets": "node scripts/set-agora-secrets.mjs",
-    "verify:call-token-flow": "node scripts/verify-call-token-flow.mjs"
+    "verify:call-token-flow": "node scripts/verify-call-token-flow.mjs",
+    "verify:call-status-guards": "node scripts/verify-call-status-guards.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

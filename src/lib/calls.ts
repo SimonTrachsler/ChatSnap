@@ -153,7 +153,7 @@ export async function endCallSession(sessionId: string): Promise<void> {
   const { error } = await (supabase.from('call_sessions') as any)
     .update({ status: 'ended' })
     .eq('id', sessionId)
-    .in('status', ACTIVE_CALL_STATUSES);
+    .eq('status', 'accepted');
   if (error) throw error;
 }
 

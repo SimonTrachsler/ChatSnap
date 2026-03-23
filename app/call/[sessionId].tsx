@@ -416,7 +416,7 @@ export default function CallSessionScreen() {
   }, [busy, leaveRtc, router, session?.id]);
 
   const handleEnd = useCallback(async () => {
-    if (!session?.id || busy) return;
+    if (!session?.id || busy || session.status !== 'accepted') return;
     setBusy(true);
     setError(null);
     try {
@@ -429,7 +429,23 @@ export default function CallSessionScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy, leaveRtc, router, session?.id]);
+  }, [busy, leaveRtc, router, session?.id, session?.status]);
+
+  const handleCancel = useCallback(async () => {
+    if (!session?.id || busy || session.status !== 'ringing') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await cancelCallSession(session.id);
+      leaveRtc();
+      skipBeforeRemoveRef.current = true;
+      router.back();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel call.');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, leaveRtc, router, session?.id, session?.status]);
 
   const finalizeBeforeExit = useCallback(async () => {
     if (!session?.id) {
@@ -532,9 +548,11 @@ export default function CallSessionScreen() {
   }
 
   const isCallee = myId === session.callee_id;
+  const isCaller = myId === session.caller_id;
   const canAccept = isCallee && session.status === 'ringing';
   const canDecline = isCallee && session.status === 'ringing';
-  const canEnd = session.status === 'accepted' || session.status === 'ringing';
+  const canCancel = isCaller && session.status === 'ringing';
+  const canEnd = session.status === 'accepted';
   const showAudioControls = session.status === 'accepted';
   const statusLine = remoteUid ? 'Friend connected' : 'Waiting for friend audio';
 
@@ -597,6 +615,17 @@ export default function CallSessionScreen() {
           >
             <Ionicons name="close" size={20} color={colors.textPrimary} />
             <Text style={styles.declineText}>Decline</Text>
+          </TouchableOpacity>
+        ) : null}
+        {canCancel ? (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.declineBtn]}
+            onPress={handleCancel}
+            disabled={busy}
+            activeOpacity={0.84}
+          >
+            <Ionicons name="close" size={20} color={colors.textPrimary} />
+            <Text style={styles.declineText}>Cancel</Text>
           </TouchableOpacity>
         ) : null}
         {canEnd ? (

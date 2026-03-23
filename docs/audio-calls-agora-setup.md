@@ -49,7 +49,8 @@ npx expo run:android
 1. Open a 1:1 chat and tap the call icon.
 2. Callee is auto-routed to the incoming call screen.
 3. Callee taps `Accept`, both users join Agora audio.
-4. Use `Mute`, `Speaker`, and `End` controls in the call screen.
+4. While ringing: caller can `Cancel`, callee can `Accept` or `Decline`.
+5. In active call: both users can use `Mute`, `Speaker`, and `End`.
 
 ## 6) Readiness check behavior
 
@@ -73,3 +74,17 @@ Required local env vars for this script:
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - Optional `AGORA_APP_ID` (if set, script asserts response appId matches it)
+
+## 8) Call status guard check (local)
+
+Use this to verify status transition guards (caller cannot self-accept; callee can accept):
+
+```bash
+npm run verify:call-status-guards
+```
+
+Required local env vars:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
