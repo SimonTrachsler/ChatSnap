@@ -41,6 +41,11 @@ type TokenResponse = {
   message?: string;
 };
 
+type TokenRequestBody = {
+  sessionId?: string;
+  probe?: boolean;
+};
+
 function userIdToAgoraUid(userId: string): number {
   // Deterministic FNV-1a hash so each user always gets the same numeric UID.
   let hash = 2166136261;
@@ -80,24 +85,28 @@ Deno.serve(async (req: Request) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const agoraAppId = Deno.env.get('AGORA_APP_ID') ?? '';
     const agoraAppCertificate = Deno.env.get('AGORA_APP_CERTIFICATE') ?? '';
 
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
       return new Response(JSON.stringify({ success: false, message: 'Supabase env vars are incomplete.' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+    const accessToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      return new Response(JSON.stringify({ success: false, message: 'Invalid authorization header.' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(accessToken);
     if (userError || !user) {
       return new Response(JSON.stringify({ success: false, message: 'Invalid or expired session.' }), {
         status: 401,
@@ -105,7 +114,29 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => ({}))) as TokenRequestBody;
+    const probe = body?.probe === true;
+
+    if (probe) {
+      const isReady = Boolean(agoraAppId && agoraAppCertificate);
+      const probeResponse: TokenResponse = {
+        success: isReady,
+        provider: 'agora',
+        appId: agoraAppId,
+        channel: '',
+        token: null,
+        uid: String(userIdToAgoraUid(user.id)),
+        expiresAt: null,
+        message: isReady
+          ? 'Agora call infrastructure is ready.'
+          : 'Audio calls are not configured yet. Missing AGORA_APP_ID and/or AGORA_APP_CERTIFICATE.',
+      };
+      return new Response(JSON.stringify(probeResponse), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const sessionId = typeof body?.sessionId === 'string' ? body.sessionId.trim() : '';
     if (!sessionId) {
       return new Response(JSON.stringify({ success: false, message: 'sessionId is required.' }), {

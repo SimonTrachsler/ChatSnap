@@ -130,6 +130,24 @@ export async function endCallSession(sessionId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function cancelCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'cancelled' })
+    .eq('id', sessionId)
+    .eq('status', 'ringing');
+  if (error) throw error;
+}
+
+export async function failCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'failed' })
+    .eq('id', sessionId)
+    .in('status', ACTIVE_CALL_STATUSES);
+  if (error) throw error;
+}
+
 export function subscribeToCallSession(
   sessionId: string,
   onChange: (session: CallSession | null) => void,
@@ -183,5 +201,14 @@ export async function requestCallToken(sessionId: string): Promise<CallTokenResp
   });
   if (error) throw error;
   if (!data) throw new Error('No call token response.');
+  return data;
+}
+
+export async function probeCallReadiness(): Promise<CallTokenResponse> {
+  const { data, error } = await supabase.functions.invoke<CallTokenResponse>('create-call-token', {
+    body: { probe: true },
+  });
+  if (error) throw error;
+  if (!data) throw new Error('No call readiness response.');
   return data;
 }

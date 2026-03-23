@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
 import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
-import { createOutgoingCallSession } from '@/lib/calls';
+import { createOutgoingCallSession, probeCallReadiness } from '@/lib/calls';
 import {
   canOpenChatWithUser,
   getOrCreateThread,
@@ -257,6 +257,14 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
     if (!friendId || !myId || startingCall) return;
     setStartingCall(true);
     try {
+      const readiness = await probeCallReadiness();
+      if (!readiness.success) {
+        Alert.alert(
+          'Audio call unavailable',
+          readiness.message ?? 'Audio calls are not configured yet.',
+        );
+        return;
+      }
       const session = await createOutgoingCallSession(friendId);
       router.push(`/call/${session.id}`);
     } catch (error) {

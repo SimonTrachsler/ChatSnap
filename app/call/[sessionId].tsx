@@ -20,8 +20,10 @@ import {
 } from 'react-native-agora';
 import {
   acceptCallSession,
+  cancelCallSession,
   declineCallSession,
   endCallSession,
+  failCallSession,
   getCallSession,
   requestCallToken,
   subscribeToCallSession,
@@ -250,6 +252,11 @@ export default function CallSessionScreen() {
       setRtcState('failed');
       setRemoteUid(null);
       leaveRtc();
+      try {
+        await failCallSession(targetSession.id);
+      } catch (markFailedError) {
+        console.warn('[call] failed to mark session as failed', markFailedError);
+      }
       throw joinError;
     } finally {
       joinInProgressRef.current = false;
@@ -381,16 +388,31 @@ export default function CallSessionScreen() {
 
   const handleBack = useCallback(async () => {
     if (busy) return;
-    if (session?.id && (session.status === 'ringing' || session.status === 'accepted')) {
+    if (!session?.id) {
+      leaveRtc();
+      router.back();
+      return;
+    }
+    if (session.status === 'accepted') {
       try {
         await endCallSession(session.id);
       } catch {
         // Ignore and still leave the screen; session can be cleaned up remotely.
       }
+    } else if (session.status === 'ringing') {
+      try {
+        if (myId === session.caller_id) {
+          await cancelCallSession(session.id);
+        } else {
+          await declineCallSession(session.id);
+        }
+      } catch {
+        // Ignore and still navigate away.
+      }
     }
     leaveRtc();
     router.back();
-  }, [busy, leaveRtc, router, session?.id, session?.status]);
+  }, [busy, leaveRtc, myId, router, session]);
 
   const toggleMute = useCallback(() => {
     const engine = engineRef.current;
