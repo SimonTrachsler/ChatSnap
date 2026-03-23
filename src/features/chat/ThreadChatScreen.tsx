@@ -416,6 +416,14 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
           )}
         </TouchableOpacity>
       </View>
+      {!checkingCallReadiness && !callReady && callReadyMessage ? (
+        <View style={styles.callInfoBar}>
+          <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
+          <Text style={styles.callInfoText} numberOfLines={2}>
+            {callReadyMessage}
+          </Text>
+        </View>
+      ) : null}
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="small" color={colors.accent} />
@@ -520,6 +528,26 @@ const styles = StyleSheet.create({
   list: { flex: 1 },
   listContent: { paddingHorizontal: spacing.lg },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  callInfoBar: {
+    marginHorizontal: spacing.lg,
+    marginTop: -4,
+    marginBottom: spacing.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.bgCardBorder,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  callInfoText: {
+    flex: 1,
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
   emptyWrap: { paddingVertical: 48, alignItems: 'center', gap: 8 },
   emptyText: { fontSize: 14, color: colors.textMuted },
   errorWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
