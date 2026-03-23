@@ -46,8 +46,8 @@ Fix the reported regressions without changing the existing app architecture:
 
 ### Planned files to change
 
-- `C:\dev\crossfunction-light\app\(tabs)\photo-preview.tsx`
-- `C:\dev\crossfunction-light\src\lib\uploadHelper.ts`
+- `C:\dev\ChatSnap\app\(tabs)\photo-preview.tsx`
+- `C:\dev\ChatSnap\src\lib\uploadHelper.ts`
 
 ### Implementation steps
 
@@ -81,17 +81,17 @@ Fix the reported regressions without changing the existing app architecture:
 
 ### Planned files to change
 
-- `C:\dev\crossfunction-light\app\(tabs)\friends\index.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\discover.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\requests.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\chats.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\detail\[friendId].tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\inbox\index.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\inbox\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\src\ui\components\PageHeader.tsx`
-- `C:\dev\crossfunction-light\src\ui\components\ScreenHeader.tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\_layout.tsx` if a navigator-level background fallback still needs to be normalized
+- `C:\dev\ChatSnap\app\(tabs)\friends\index.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\discover.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\requests.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\chats.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\detail\[friendId].tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\chat\[userId].tsx`
+- `C:\dev\ChatSnap\app\(tabs)\inbox\index.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\inbox\chat\[userId].tsx`
+- `C:\dev\ChatSnap\src\ui\components\PageHeader.tsx`
+- `C:\dev\ChatSnap\src\ui\components\ScreenHeader.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\_layout.tsx` if a navigator-level background fallback still needs to be normalized
 
 ### Implementation steps
 
@@ -120,7 +120,7 @@ Fix the reported regressions without changing the existing app architecture:
 
 ### Planned files to change
 
-- `C:\dev\crossfunction-light\app\(tabs)\index.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\index.tsx`
 
 ### Implementation steps
 
@@ -148,7 +148,7 @@ Fix the reported regressions without changing the existing app architecture:
 
 ### Planned files to change
 
-- `C:\dev\crossfunction-light\app\(tabs)\index.tsx`
+- `C:\dev\ChatSnap\app\(tabs)\index.tsx`
 
 ### Implementation steps
 
@@ -191,11 +191,11 @@ Fix the reported regressions without changing the existing app architecture:
 
 ### Planned files to change
 
-- `C:\dev\crossfunction-light\app\(tabs)\friends\discover.tsx`
-- `C:\dev\crossfunction-light\src\lib\discover.ts`
-- `C:\dev\crossfunction-light\src\lib\profileSearch.ts`
-- `C:\dev\crossfunction-light\src\lib\friendRequests.ts`
-- `C:\dev\crossfunction-light\src\lib\supabase.ts` if the RPC helper needs stronger typed/null-safe handling
+- `C:\dev\ChatSnap\app\(tabs)\friends\discover.tsx`
+- `C:\dev\ChatSnap\src\lib\discover.ts`
+- `C:\dev\ChatSnap\src\lib\profileSearch.ts`
+- `C:\dev\ChatSnap\src\lib\friendRequests.ts`
+- `C:\dev\ChatSnap\src\lib\supabase.ts` if the RPC helper needs stronger typed/null-safe handling
 
 ### Implementation steps
 
@@ -258,3 +258,4 @@ If you want the fastest immediate device check after approval, the first command
 ```powershell
 npx expo start --tunnel
 ```
+

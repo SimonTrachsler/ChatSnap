@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "crossfunction-light",
-    "slug": "crossfunction-light",
+    "name": "ChatSnap",
+    "slug": "ChatSnap",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "crossfunction-light",
+    "scheme": "ChatSnap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -25,7 +25,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Die App benötigt Kamerazugriff, um Fotos aufzunehmen."
+          "cameraPermission": "Die App benÃ¶tigt Kamerazugriff, um Fotos aufzunehmen."
         }
       ]
     ]

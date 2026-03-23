@@ -13,36 +13,36 @@ Scope: Planning only (no code changes until approval)
 ## 2) Root Cause Summary (Likely/Confirmed)
 
 ### Issue 1: Camera top dark overlay
-- Confirmed in [app/(tabs)/photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx): explicit `topShade` layer is rendered over the image (`height: 180`, semi-transparent dark color).
-- Camera screen also has dark top UI chips in [app/(tabs)/index.tsx](/C:/dev/crossfunction-light/app/(tabs)/index.tsx) (`headerChip`, `switchBtn`) and preview offset math (`top: -insets.top`) that can visually exaggerate top contrast.
+- Confirmed in [app/(tabs)/photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx): explicit `topShade` layer is rendered over the image (`height: 180`, semi-transparent dark color).
+- Camera screen also has dark top UI chips in [app/(tabs)/index.tsx](/C:/dev/ChatSnap/app/(tabs)/index.tsx) (`headerChip`, `switchBtn`) and preview offset math (`top: -insets.top`) that can visually exaggerate top contrast.
 
 ### Issue 2: Heading inconsistencies
-- Primary source is shared header layout in [src/ui/components/PageHeader.tsx](/C:/dev/crossfunction-light/src/ui/components/PageHeader.tsx): title sits in a flex row between left/right placeholders with asymmetric action widths, causing visual off-centering on screens with right actions (e.g. Friends).
+- Primary source is shared header layout in [src/ui/components/PageHeader.tsx](/C:/dev/ChatSnap/src/ui/components/PageHeader.tsx): title sits in a flex row between left/right placeholders with asymmetric action widths, causing visual off-centering on screens with right actions (e.g. Friends).
 - Secondary source is per-screen list/header spacing differences in the tab screens.
 
 ### Issue 3: Missing back button in Friends Search
-- Confirmed in [app/(tabs)/friends/search.tsx](/C:/dev/crossfunction-light/app/(tabs)/friends/search.tsx): no header/back action exists.
+- Confirmed in [app/(tabs)/friends/search.tsx](/C:/dev/ChatSnap/app/(tabs)/friends/search.tsx): no header/back action exists.
 
 ### Issue 4: Login `.rest` error after logout
-- Root cause identified in [src/lib/supabase.ts](/C:/dev/crossfunction-light/src/lib/supabase.ts): `callRpc` extracts `supabase.rpc` into a standalone function variable before calling it.
+- Root cause identified in [src/lib/supabase.ts](/C:/dev/ChatSnap/src/lib/supabase.ts): `callRpc` extracts `supabase.rpc` into a standalone function variable before calling it.
 - This loses method context (`this`), and Supabase internals access `this.rest`, producing `Cannot read property 'rest' of undefined`.
 - This impacts every `callRpc(...)` user (username login, discover, stats, chat RPC paths), but user-visible blocker is username login after logout.
 
 ## 3) Files to Inspect/Change
 
 ### Planned edits
-- [app/(tabs)/photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx)
-- [app/(tabs)/index.tsx](/C:/dev/crossfunction-light/app/(tabs)/index.tsx)
-- [src/ui/components/PageHeader.tsx](/C:/dev/crossfunction-light/src/ui/components/PageHeader.tsx)
-- [app/(tabs)/friends/search.tsx](/C:/dev/crossfunction-light/app/(tabs)/friends/search.tsx)
-- [src/lib/supabase.ts](/C:/dev/crossfunction-light/src/lib/supabase.ts)
+- [app/(tabs)/photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx)
+- [app/(tabs)/index.tsx](/C:/dev/ChatSnap/app/(tabs)/index.tsx)
+- [src/ui/components/PageHeader.tsx](/C:/dev/ChatSnap/src/ui/components/PageHeader.tsx)
+- [app/(tabs)/friends/search.tsx](/C:/dev/ChatSnap/app/(tabs)/friends/search.tsx)
+- [src/lib/supabase.ts](/C:/dev/ChatSnap/src/lib/supabase.ts)
 
 ### Verify-only (no functional change expected unless needed)
-- [app/(tabs)/friends/index.tsx](/C:/dev/crossfunction-light/app/(tabs)/friends/index.tsx)
-- [app/(tabs)/gallery.tsx](/C:/dev/crossfunction-light/app/(tabs)/gallery.tsx)
-- [app/(tabs)/inbox/index.tsx](/C:/dev/crossfunction-light/app/(tabs)/inbox/index.tsx)
-- [app/(tabs)/settings.tsx](/C:/dev/crossfunction-light/app/(tabs)/settings.tsx)
-- [app/login.tsx](/C:/dev/crossfunction-light/app/login.tsx)
+- [app/(tabs)/friends/index.tsx](/C:/dev/ChatSnap/app/(tabs)/friends/index.tsx)
+- [app/(tabs)/gallery.tsx](/C:/dev/ChatSnap/app/(tabs)/gallery.tsx)
+- [app/(tabs)/inbox/index.tsx](/C:/dev/ChatSnap/app/(tabs)/inbox/index.tsx)
+- [app/(tabs)/settings.tsx](/C:/dev/ChatSnap/app/(tabs)/settings.tsx)
+- [app/login.tsx](/C:/dev/ChatSnap/app/login.tsx)
 
 ## 4) Implementation Steps
 
@@ -111,4 +111,5 @@ npx expo start --tunnel --clear
 ```
 
 Then open Expo Go and scan the generated QR code.
+
 

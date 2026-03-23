@@ -1,4 +1,4 @@
-# crossfunction-light
+# ChatSnap
 
 Expo + React Native + TypeScript App mit Expo Router und Supabase.
 
@@ -81,3 +81,4 @@ npx expo start
 - This project uses a floating tab bar and safe-area aware layouts.
 - Chat screen logic is centralized in `src/features/chat/ThreadChatScreen.tsx`.
 - If Expo tunnel fails, check ngrok status: <https://status.ngrok.com/>.
+

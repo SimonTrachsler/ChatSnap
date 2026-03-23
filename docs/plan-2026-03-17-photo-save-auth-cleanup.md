@@ -19,7 +19,7 @@ Mode: Planning only (no implementation until approval)
 ### 1) Photo save warning
 
 Confirmed mismatch between app write path and actual remote schema:
-- App currently writes `user_photos.storage_path` first in [photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx), then falls back to `image_url`.
+- App currently writes `user_photos.storage_path` first in [photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx), then falls back to `image_url`.
 - Remote schema check (`supabase db query --linked`) shows `public.user_photos` currently has:
   - `id`, `user_id`, `image_url`, `created_at`
   - **no `storage_path`**
@@ -32,9 +32,9 @@ Why this exists even though migration history includes a storage_path migration:
 
 Likely combined causes:
 - Several code paths call `supabase.auth.signOut()` without scope options (default behavior can revoke broader session state), found in:
-  - [src/lib/supabase.ts](/C:/dev/crossfunction-light/src/lib/supabase.ts)
-  - [app/(tabs)/settings.tsx](/C:/dev/crossfunction-light/app/(tabs)/settings.tsx)
-  - [app/(tabs)/_layout.tsx](/C:/dev/crossfunction-light/app/(tabs)/_layout.tsx)
+  - [src/lib/supabase.ts](/C:/dev/ChatSnap/src/lib/supabase.ts)
+  - [app/(tabs)/settings.tsx](/C:/dev/ChatSnap/app/(tabs)/settings.tsx)
+  - [app/(tabs)/_layout.tsx](/C:/dev/ChatSnap/app/(tabs)/_layout.tsx)
 - Central recovery in `handleAuthSessionError()` signs out immediately; with stale refresh tokens this can cascade into repeated auth churn and noisy logs.
 - `initAuthListener()` does immediate `getSession()` + `getUser()` validation; stale local token handling is functional but not yet fully de-duplicated for multi-device churn.
 - `ensureProfileForUser()` currently upserts only `{ id, email }`; if schema constraints require normalized username, this can silently fail and increase post-auth inconsistency risk.
@@ -43,9 +43,9 @@ Likely combined causes:
 
 High-value cleanup targets identified:
 - Legacy compatibility branches still in production flow:
-  - `storage_path`/`image_url` compatibility code duplicated in [photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx) and [snapSend.ts](/C:/dev/crossfunction-light/src/lib/snapSend.ts)
+  - `storage_path`/`image_url` compatibility code duplicated in [photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx) and [snapSend.ts](/C:/dev/ChatSnap/src/lib/snapSend.ts)
 - Legacy route likely unused in current UX:
-  - [app/auth.tsx](/C:/dev/crossfunction-light/app/auth.tsx)
+  - [app/auth.tsx](/C:/dev/ChatSnap/app/auth.tsx)
 - Noisy non-essential logs in auth/login paths (dev logs + repeated warning paths)
 - `ensureProfileForUser()` swallow-only async upsert (`.then(() => {})`) without meaningful failure handling
 
@@ -54,25 +54,25 @@ High-value cleanup targets identified:
 ## C) Files to Inspect / Change
 
 ### Photo save warning
-- [app/(tabs)/photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx)
-- [src/lib/snapSend.ts](/C:/dev/crossfunction-light/src/lib/snapSend.ts)
-- [app/(tabs)/gallery.tsx](/C:/dev/crossfunction-light/app/(tabs)/gallery.tsx)
-- [src/types/database.ts](/C:/dev/crossfunction-light/src/types/database.ts)
+- [app/(tabs)/photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx)
+- [src/lib/snapSend.ts](/C:/dev/ChatSnap/src/lib/snapSend.ts)
+- [app/(tabs)/gallery.tsx](/C:/dev/ChatSnap/app/(tabs)/gallery.tsx)
+- [src/types/database.ts](/C:/dev/ChatSnap/src/types/database.ts)
 - New migration (safe schema alignment): `supabase/migrations/20260317xxxxxx_user_photos_schema_alignment.sql`
 
 ### Multi-device auth
-- [src/lib/supabase.ts](/C:/dev/crossfunction-light/src/lib/supabase.ts)
-- [app/_layout.tsx](/C:/dev/crossfunction-light/app/_layout.tsx)
-- [app/(tabs)/settings.tsx](/C:/dev/crossfunction-light/app/(tabs)/settings.tsx)
-- [app/(tabs)/_layout.tsx](/C:/dev/crossfunction-light/app/(tabs)/_layout.tsx)
-- [src/store/useAuthStore.ts](/C:/dev/crossfunction-light/src/store/useAuthStore.ts)
+- [src/lib/supabase.ts](/C:/dev/ChatSnap/src/lib/supabase.ts)
+- [app/_layout.tsx](/C:/dev/ChatSnap/app/_layout.tsx)
+- [app/(tabs)/settings.tsx](/C:/dev/ChatSnap/app/(tabs)/settings.tsx)
+- [app/(tabs)/_layout.tsx](/C:/dev/ChatSnap/app/(tabs)/_layout.tsx)
+- [src/store/useAuthStore.ts](/C:/dev/ChatSnap/src/store/useAuthStore.ts)
 
 ### Cleanup pass
-- [app/auth.tsx](/C:/dev/crossfunction-light/app/auth.tsx)
-- [src/lib/uploadHelper.ts](/C:/dev/crossfunction-light/src/lib/uploadHelper.ts)
-- [src/lib/profileSearch.ts](/C:/dev/crossfunction-light/src/lib/profileSearch.ts)
-- [src/lib/discover.ts](/C:/dev/crossfunction-light/src/lib/discover.ts)
-- [src/components/ErrorBoundary.tsx](/C:/dev/crossfunction-light/src/components/ErrorBoundary.tsx)
+- [app/auth.tsx](/C:/dev/ChatSnap/app/auth.tsx)
+- [src/lib/uploadHelper.ts](/C:/dev/ChatSnap/src/lib/uploadHelper.ts)
+- [src/lib/profileSearch.ts](/C:/dev/ChatSnap/src/lib/profileSearch.ts)
+- [src/lib/discover.ts](/C:/dev/ChatSnap/src/lib/discover.ts)
+- [src/components/ErrorBoundary.tsx](/C:/dev/ChatSnap/src/components/ErrorBoundary.tsx)
 
 ---
 
@@ -133,12 +133,12 @@ High-value cleanup targets identified:
 
 Recommended safe candidates:
 - Legacy route cleanup:
-  - [app/auth.tsx](/C:/dev/crossfunction-light/app/auth.tsx) appears superseded by login/register flow.
+  - [app/auth.tsx](/C:/dev/ChatSnap/app/auth.tsx) appears superseded by login/register flow.
 - Remove warning-first fallback patterns after schema alignment:
-  - [app/(tabs)/photo-preview.tsx](/C:/dev/crossfunction-light/app/(tabs)/photo-preview.tsx)
-  - [src/lib/snapSend.ts](/C:/dev/crossfunction-light/src/lib/snapSend.ts)
+  - [app/(tabs)/photo-preview.tsx](/C:/dev/ChatSnap/app/(tabs)/photo-preview.tsx)
+  - [src/lib/snapSend.ts](/C:/dev/ChatSnap/src/lib/snapSend.ts)
 - Tighten silent failure behavior:
-  - [src/lib/supabase.ts](/C:/dev/crossfunction-light/src/lib/supabase.ts) (`ensureProfileForUser`)
+  - [src/lib/supabase.ts](/C:/dev/ChatSnap/src/lib/supabase.ts) (`ensureProfileForUser`)
 - Keep only useful logs, remove repetitive noise in auth/login save paths.
 
 ---
@@ -156,4 +156,5 @@ If schema migration is included in this implementation batch, I will also run:
 ```bash
 npx supabase db push
 ```
+
 

@@ -28,10 +28,10 @@ No implementation is performed in this plan file yet.
 
 ### Files to inspect/change
 
-- `C:\dev\crossfunction-light\src\lib\chat.ts`
-- `C:\dev\crossfunction-light\app\(tabs)\inbox\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\index.tsx` (guard consistency check, minimal if needed)
+- `C:\dev\ChatSnap\src\lib\chat.ts`
+- `C:\dev\ChatSnap\app\(tabs)\inbox\chat\[userId].tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\chat\[userId].tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\index.tsx` (guard consistency check, minimal if needed)
 
 ### Planned implementation
 
@@ -62,12 +62,12 @@ No implementation is performed in this plan file yet.
 
 ### Files to inspect/change
 
-- `C:\dev\crossfunction-light\app\(tabs)\settings.tsx`
-- `C:\dev\crossfunction-light\src\lib\supabase.ts`
-- `C:\dev\crossfunction-light\src\store\useActiveThreadStore.ts` (if reset helper needed)
-- `C:\dev\crossfunction-light\app\(tabs)\inbox\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\app\(tabs)\friends\chat\[userId].tsx`
-- `C:\dev\crossfunction-light\app\_layout.tsx` (only if minimal auth-transition cleanup is required)
+- `C:\dev\ChatSnap\app\(tabs)\settings.tsx`
+- `C:\dev\ChatSnap\src\lib\supabase.ts`
+- `C:\dev\ChatSnap\src\store\useActiveThreadStore.ts` (if reset helper needed)
+- `C:\dev\ChatSnap\app\(tabs)\inbox\chat\[userId].tsx`
+- `C:\dev\ChatSnap\app\(tabs)\friends\chat\[userId].tsx`
+- `C:\dev\ChatSnap\app\_layout.tsx` (only if minimal auth-transition cleanup is required)
 
 ### Planned implementation
 
@@ -122,4 +122,5 @@ Run and test immediately after I implement the approved changes:
 ```bash
 npx expo start --tunnel --clear
 ```
+
 
