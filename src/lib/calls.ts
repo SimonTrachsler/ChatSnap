@@ -150,6 +150,15 @@ export async function failCallSession(sessionId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function markMissedCallSession(sessionId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local client typing for updates is narrower than runtime schema
+  const { error } = await (supabase.from('call_sessions') as any)
+    .update({ status: 'missed' })
+    .eq('id', sessionId)
+    .eq('status', 'ringing');
+  if (error) throw error;
+}
+
 export function subscribeToCallSession(
   sessionId: string,
   onChange: (session: CallSession | null) => void,

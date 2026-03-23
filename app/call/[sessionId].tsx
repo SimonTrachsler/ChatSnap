@@ -25,6 +25,7 @@ import {
   endCallSession,
   failCallSession,
   getCallSession,
+  markMissedCallSession,
   requestCallToken,
   subscribeToCallSession,
   type CallSession,
@@ -35,6 +36,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { colors, radius, spacing } from '@/ui/theme';
 
 const TERMINAL_STATUSES = new Set(['declined', 'missed', 'cancelled', 'failed', 'ended']);
+const RING_TIMEOUT_MS = 35_000;
 
 function resolveSessionId(value: string | string[] | undefined): string | null {
   if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -337,6 +339,35 @@ export default function CallSessionScreen() {
       setRemoteUid(null);
     }
   }, [joinRtcAudio, leaveRtc, myId, session]);
+
+  useEffect(() => {
+    if (!session?.id || session.status !== 'ringing') return;
+    const createdAtMs = new Date(session.created_at).getTime();
+    if (!Number.isFinite(createdAtMs)) return;
+
+    const deadlineMs = createdAtMs + RING_TIMEOUT_MS;
+    const remainingMs = Math.max(0, deadlineMs - Date.now());
+    let cancelled = false;
+
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      markMissedCallSession(session.id)
+        .catch((timeoutError) => {
+          console.warn('[call] failed to mark missed after timeout', timeoutError);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            leaveRtc();
+            router.back();
+          }
+        });
+    }, remainingMs + 25);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [leaveRtc, router, session?.created_at, session?.id, session?.status]);
 
   useEffect(() => () => {
     leaveRtc();
