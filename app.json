@@ -4,7 +4,7 @@
     "slug": "ChatSnap",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "ChatSnap",
+    "scheme": "chatsnap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.crossfunction.light"
+      "bundleIdentifier": "com.chatsnap.app"
     },
     "web": {
       "bundler": "metro",

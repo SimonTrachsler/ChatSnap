@@ -1,5 +1,5 @@
 -- =============================================================================
--- Chatsnap friend system: Schema A + status declined. Pure SQL only (no DO blocks).
+-- ChatSnap friend system: Schema A + status declined. Pure SQL only (no DO blocks).
 -- Assumes: friends has user_a, user_b; friend_requests has requester_id, receiver_id.
 -- If friends already has user_id, friend_id, skip this migration or run only
 -- the friend_requests and RPC sections (steps 1, 7, 8, 9, 10) manually.
