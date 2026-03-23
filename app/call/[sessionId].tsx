@@ -14,13 +14,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import {
-  ChannelProfileType,
-  ClientRoleType,
-  createAgoraRtcEngine,
-  type IRtcEngine,
-  type IRtcEngineEventHandler,
-} from 'react-native-agora';
-import {
   acceptCallSession,
   CALL_RING_TIMEOUT_MS,
   cancelCallSession,
@@ -40,6 +33,49 @@ import { colors, radius, spacing } from '@/ui/theme';
 import incomingRingTone from '@/assets/audio/incoming-ring.wav';
 
 const TERMINAL_STATUSES = new Set(['declined', 'missed', 'cancelled', 'failed', 'ended']);
+
+type AgoraEngine = {
+  registerEventHandler: (handler: Record<string, unknown>) => void;
+  unregisterEventHandler: (handler: Record<string, unknown>) => void;
+  initialize: (config: { appId: string; channelProfile: number }) => number;
+  enableAudio: () => number | void;
+  setClientRole: (role: number) => number;
+  setEnableSpeakerphone: (enabled: boolean) => number;
+  muteLocalAudioStream: (muted: boolean) => number;
+  joinChannel: (
+    token: string,
+    channelName: string,
+    uid: number,
+    options: Record<string, unknown>,
+  ) => number;
+  leaveChannel: () => number | void;
+  release: () => number | void;
+  renewToken: (token: string) => number | void;
+};
+
+type AgoraRuntime = {
+  createAgoraRtcEngine: () => AgoraEngine;
+  ChannelProfileType: { ChannelProfileCommunication: number };
+  ClientRoleType: { ClientRoleBroadcaster: number };
+};
+
+let cachedAgoraRuntimePromise: Promise<AgoraRuntime | null> | null = null;
+
+async function loadAgoraRuntime(): Promise<AgoraRuntime | null> {
+  if (!cachedAgoraRuntimePromise) {
+    cachedAgoraRuntimePromise = import('react-native-agora')
+      .then((mod) => ({
+        createAgoraRtcEngine: mod.createAgoraRtcEngine as AgoraRuntime['createAgoraRtcEngine'],
+        ChannelProfileType: mod.ChannelProfileType as AgoraRuntime['ChannelProfileType'],
+        ClientRoleType: mod.ClientRoleType as AgoraRuntime['ClientRoleType'],
+      }))
+      .catch((error) => {
+        console.warn('[call] react-native-agora runtime unavailable', error);
+        return null;
+      });
+  }
+  return cachedAgoraRuntimePromise;
+}
 
 function resolveSessionId(value: string | string[] | undefined): string | null {
   if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -114,8 +150,8 @@ export default function CallSessionScreen() {
   const [speakerEnabled, setSpeakerEnabled] = useState(true);
   const [callDurationSeconds, setCallDurationSeconds] = useState(0);
 
-  const engineRef = useRef<IRtcEngine | null>(null);
-  const eventHandlerRef = useRef<IRtcEngineEventHandler | null>(null);
+  const engineRef = useRef<AgoraEngine | null>(null);
+  const eventHandlerRef = useRef<Record<string, unknown> | null>(null);
   const joinedRef = useRef(false);
   const joinInProgressRef = useRef(false);
   const skipBeforeRemoveRef = useRef(false);
@@ -243,17 +279,26 @@ export default function CallSessionScreen() {
 
       setTokenNote(noteFromTokenResponse(tokenRes));
       const uid = parseAgoraUid(tokenRes.uid);
+      const agoraRuntime = await loadAgoraRuntime();
+      if (!agoraRuntime) {
+        throw new Error('Audio calls need a native build. Use `npx expo run:ios` (not Expo Go).');
+      }
+      const {
+        createAgoraRtcEngine,
+        ChannelProfileType,
+        ClientRoleType,
+      } = agoraRuntime;
 
       leaveRtc();
       const engine = createAgoraRtcEngine();
-      const handler: IRtcEngineEventHandler = {
+      const handler: Record<string, unknown> = {
         onJoinChannelSuccess: () => {
           setRtcState('connected');
         },
-        onUserJoined: (_connection, nextRemoteUid) => {
+        onUserJoined: (_connection: unknown, nextRemoteUid: number) => {
           setRemoteUid(nextRemoteUid);
         },
-        onUserOffline: (_connection, nextRemoteUid) => {
+        onUserOffline: (_connection: unknown, nextRemoteUid: number) => {
           setRemoteUid((prev) => (prev === nextRemoteUid ? null : prev));
         },
         onLeaveChannel: () => {
@@ -267,7 +312,7 @@ export default function CallSessionScreen() {
         onRequestToken: () => {
           void renewRtcToken(targetSession.id);
         },
-        onError: (err, msg) => {
+        onError: (err: number, msg: string) => {
           setRtcState('failed');
           setError(`Audio error (${err}): ${msg}`);
         },
