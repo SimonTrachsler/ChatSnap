@@ -38,6 +38,7 @@ npm run start:lan
 - `npm run lint`
 - `npm run start:lan`
 - `npm run start:lan:clear`
+- `npm run verify:calls`
 - `npx tsc --noEmit`
 - `npx expo-doctor`
 - `npm run prepare-assets`

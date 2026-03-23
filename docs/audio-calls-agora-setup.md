@@ -88,3 +88,9 @@ Required local env vars:
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+
+Run both local checks together:
+
+```bash
+npm run verify:calls
+```

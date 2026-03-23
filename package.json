@@ -13,6 +13,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json}\"",
     "prepare-assets": "node scripts/init-assets.js",
     "supabase:set-agora-secrets": "node scripts/set-agora-secrets.mjs",
+    "verify:calls": "npm run verify:call-token-flow && npm run verify:call-status-guards",
     "verify:call-token-flow": "node scripts/verify-call-token-flow.mjs",
     "verify:call-status-guards": "node scripts/verify-call-status-guards.mjs"
   },
