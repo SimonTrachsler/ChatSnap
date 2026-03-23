@@ -18,6 +18,12 @@ supabase secrets set AGORA_APP_CERTIFICATE=YOUR_AGORA_APP_CERTIFICATE
 supabase secrets set AGORA_TOKEN_TTL_SECONDS=3600
 ```
 
+Or use the helper script:
+
+```bash
+npm run supabase:set-agora-secrets -- --app-id=YOUR_AGORA_APP_ID --app-cert=YOUR_AGORA_APP_CERTIFICATE --ttl=3600
+```
+
 `AGORA_APP_ID` is required.
 `AGORA_APP_CERTIFICATE` can be omitted for debug mode, but production should always use it.
 
