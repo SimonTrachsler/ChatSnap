@@ -36,6 +36,7 @@ ngrok*.log
 expo-go-url.txt
 expo-tunnel-qr.png
 tunnel-url.txt
+supabase/.temp/
 
 # TypeScript
 *.tsbuildinfo
