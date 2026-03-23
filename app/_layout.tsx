@@ -10,13 +10,15 @@ import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { InAppToast } from '@/components/InAppToast';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
-import { StyleSheet, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
 import { colors } from '@/ui/theme';
 import { BackgroundDecor } from '@/ui/components/BackgroundDecor';
 import { STACK_TRANSITION_OPTIONS } from '@/ui/navigationTransitions';
 
 const LAYOUT_BG = colors.bg;
 type SafeRoute = '/' | '/welcome' | '/onboarding/bio';
+const INCOMING_CALL_SWEEP_INTERVAL_MS = 15_000;
+const INCOMING_CALL_SWEEP_THROTTLE_MS = 5_000;
 
 // Navigation mit Retry (Root-Layout darf useRootNavigationState nicht nutzen – wirft dort)
 function useSafeReplace() {
@@ -38,6 +40,7 @@ export default function RootLayout() {
   const initialRedirectRef = useRef(false);
   const prevUserRef = useRef<typeof user | undefined>(undefined);
   const lastIncomingCallRef = useRef<string | null>(null);
+  const lastIncomingSweepAtRef = useRef(0);
 
   // Auth gate: on app start getSession() runs in initAuthListener; store gets session or null
   useEffect(() => {
@@ -128,9 +131,12 @@ export default function RootLayout() {
     }
   }, [router]);
 
-  const checkPendingIncomingCall = useCallback(async () => {
+  const checkPendingIncomingCall = useCallback(async (force = false) => {
     const userId = user?.id;
     if (!userId) return;
+    const now = Date.now();
+    if (!force && now - lastIncomingSweepAtRef.current < INCOMING_CALL_SWEEP_THROTTLE_MS) return;
+    lastIncomingSweepAtRef.current = now;
     try {
       const pendingSession = await sweepAndGetLatestIncomingRingingCallSession(userId);
       if (pendingSession?.id) {
@@ -145,6 +151,7 @@ export default function RootLayout() {
     const userId = user?.id;
     if (!userId) {
       lastIncomingCallRef.current = null;
+      lastIncomingSweepAtRef.current = 0;
       return;
     }
     void checkPendingIncomingCall();
@@ -152,6 +159,22 @@ export default function RootLayout() {
       pushIncomingCall(incomingSession.id);
     });
   }, [checkPendingIncomingCall, pushIncomingCall, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void checkPendingIncomingCall(true);
+      }
+    });
+    const interval = setInterval(() => {
+      void checkPendingIncomingCall(false);
+    }, INCOMING_CALL_SWEEP_INTERVAL_MS);
+    return () => {
+      appStateSub.remove();
+      clearInterval(interval);
+    };
+  }, [checkPendingIncomingCall, user?.id]);
 
   return (
     /* @ts-expect-error ErrorBoundary type incompatible with React 19 JSX */

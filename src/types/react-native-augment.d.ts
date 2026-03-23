@@ -17,6 +17,10 @@ declare module 'react-native' {
   export const Keyboard: {
     addListener: (eventType: string, listener: () => void) => { remove: () => void };
   };
+  export const AppState: {
+    addEventListener: (type: string, listener: (state: string) => void) => { remove: () => void };
+    currentState?: string;
+  };
   export const PermissionsAndroid: {
     PERMISSIONS: { RECORD_AUDIO: string };
     RESULTS: { GRANTED: string };
