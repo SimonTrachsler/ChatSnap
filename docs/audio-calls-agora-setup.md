@@ -64,6 +64,7 @@ Call session constraints:
 
 - A user can only be part of one active call (`ringing` or `accepted`) at a time.
 - Chat pre-check uses `get_call_availability(...)` so the call button can be disabled with a clear reason (for example: friend busy in another call).
+- `call_presence` is synced by DB triggers and published via realtime for instant availability updates in chat.
 
 ## 7) End-to-end token flow check (local)
 
@@ -114,6 +115,20 @@ Use this to verify the friend-safe availability RPC (`available`, `already_with_
 
 ```bash
 npm run verify:call-availability
+```
+
+Required local env vars:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+## 11) Call presence sync check (local)
+
+Use this to verify `call_presence` trigger sync (false -> true on ringing -> false on cancel):
+
+```bash
+npm run verify:call-presence-sync
 ```
 
 Required local env vars:

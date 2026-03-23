@@ -275,6 +275,26 @@ export function subscribeToIncomingCallSessions(
   };
 }
 
+export function subscribeToCallPresence(
+  userId: string,
+  onChange: () => void,
+): () => void {
+  const channel = supabase
+    .channel(`call_presence:${userId}:${Date.now()}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'call_presence', filter: `user_id=eq.${userId}` },
+      () => {
+        onChange();
+      },
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 export async function requestCallToken(sessionId: string): Promise<CallTokenResponse> {
   const { data, error } = await supabase.functions.invoke<CallTokenResponse>('create-call-token', {
     body: { sessionId },

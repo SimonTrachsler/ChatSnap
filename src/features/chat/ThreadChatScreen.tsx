@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
 import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
-import { createOutgoingCallSession, getCallAvailability, probeCallReadiness } from '@/lib/calls';
+import { createOutgoingCallSession, getCallAvailability, probeCallReadiness, subscribeToCallPresence } from '@/lib/calls';
 import {
   canOpenChatWithUser,
   getOrCreateThread,
@@ -296,11 +296,18 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
 
   useEffect(() => {
     void refreshCallState({ forceRefresh: false, showLoading: true });
-    if (!friendId || !myId) return;
-    const interval = setInterval(() => {
+    if (!friendId || !myId) return undefined;
+
+    const refreshFromRealtime = () => {
       void refreshCallState({ forceRefresh: false, showLoading: false });
-    }, 12_000);
-    return () => clearInterval(interval);
+    };
+    const unsubSelfPresence = subscribeToCallPresence(myId, refreshFromRealtime);
+    const unsubFriendPresence = subscribeToCallPresence(friendId, refreshFromRealtime);
+
+    return () => {
+      unsubSelfPresence();
+      unsubFriendPresence();
+    };
   }, [friendId, myId, refreshCallState]);
 
   const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;

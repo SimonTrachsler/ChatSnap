@@ -223,6 +223,23 @@ export interface Database {
           ended_at?: string | null;
         };
       };
+      call_presence: {
+        Row: {
+          user_id: string;
+          is_in_call: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          is_in_call?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          is_in_call?: boolean;
+          updated_at?: string;
+        };
+      };
       friend_aliases: {
         Row: { id: string; owner_id: string; friend_id: string; alias: string | null };
         Insert: { id?: string; owner_id: string; friend_id: string; alias?: string | null };
