@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "crossfunction-light",
+    "slug": "crossfunction-light",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "crossfunction-light",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.crossfunction.light"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Die App benötigt Kamerazugriff, um Fotos aufzunehmen."
+        }
+      ]
+    ]
+  }
+}

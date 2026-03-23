@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.npm-cache/
+
+# Expo
+.expo/
+.expo
+**/.expo/
+dist/
+dist-audit/
+web-build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+.codex/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+expo*.log
+tunnel*.log
+ngrok*.log
+expo-go-url.txt
+expo-tunnel-qr.png
+tunnel-url.txt
+
+# TypeScript
+*.tsbuildinfo
