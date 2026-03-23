@@ -50,7 +50,7 @@ npx expo run:android
 2. Callee is auto-routed to the incoming call screen and receives ring feedback (vibration + ringtone).
 3. Callee taps `Accept`, both users join Agora audio.
 4. While ringing: caller can `Cancel`, callee can `Accept` or `Decline`.
-5. In active call: both users can use `Mute`, `Speaker`, and `End`.
+5. In active call: both users can use `Mute`, `Speaker`, and `End`, and see a live call duration timer.
 
 ## 6) Readiness check behavior
 

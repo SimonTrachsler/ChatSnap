@@ -68,6 +68,13 @@ function humanStatus(status: string): string {
   }
 }
 
+function formatDuration(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
 function parseAgoraUid(value: string): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
@@ -105,6 +112,7 @@ export default function CallSessionScreen() {
   const [remoteUid, setRemoteUid] = useState<number | null>(null);
   const [micMuted, setMicMuted] = useState(false);
   const [speakerEnabled, setSpeakerEnabled] = useState(true);
+  const [callDurationSeconds, setCallDurationSeconds] = useState(0);
 
   const engineRef = useRef<IRtcEngine | null>(null);
   const eventHandlerRef = useRef<IRtcEngineEventHandler | null>(null);
@@ -452,6 +460,23 @@ export default function CallSessionScreen() {
     };
   }, [leaveRtc, router, session?.created_at, session?.id, session?.status]);
 
+  useEffect(() => {
+    if (!session?.id || session.status !== 'accepted') {
+      setCallDurationSeconds(0);
+      return;
+    }
+
+    const parsedStartedAtMs = session.started_at ? Date.parse(session.started_at) : Number.NaN;
+    const startedAtMs = Number.isFinite(parsedStartedAtMs) ? parsedStartedAtMs : Date.now();
+    const update = () => {
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      setCallDurationSeconds(elapsedSeconds);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [session?.id, session?.started_at, session?.status]);
+
   useEffect(() => () => {
     leaveRtc();
   }, [leaveRtc]);
@@ -640,6 +665,7 @@ export default function CallSessionScreen() {
         <Text style={styles.peerName}>{peerName}</Text>
         <Text style={styles.statusText}>{humanStatus(session.status)}</Text>
         <Text style={styles.metaText}>Audio: {rtcState}</Text>
+        {showAudioControls ? <Text style={styles.metaText}>Duration: {formatDuration(callDurationSeconds)}</Text> : null}
         {showAudioControls ? <Text style={styles.metaText}>{statusLine}</Text> : null}
         <Text style={styles.noteText}>{tokenNote}</Text>
       </View>
