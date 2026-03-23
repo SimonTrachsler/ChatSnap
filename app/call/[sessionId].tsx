@@ -12,6 +12,7 @@ import {
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import {
   ChannelProfileType,
   ClientRoleType,
@@ -36,6 +37,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { colors, radius, spacing } from '@/ui/theme';
+import incomingRingTone from '@/assets/audio/incoming-ring.wav';
 
 const TERMINAL_STATUSES = new Set(['declined', 'missed', 'cancelled', 'failed', 'ended']);
 
@@ -109,6 +111,7 @@ export default function CallSessionScreen() {
   const joinedRef = useRef(false);
   const joinInProgressRef = useRef(false);
   const skipBeforeRemoveRef = useRef(false);
+  const ringSoundRef = useRef<Audio.Sound | null>(null);
 
   const leaveRtc = useCallback(() => {
     const engine = engineRef.current;
@@ -162,6 +165,48 @@ export default function CallSessionScreen() {
       }
     } catch (tokenError) {
       console.warn('[call] token renew failed', tokenError);
+    }
+  }, []);
+
+  const stopIncomingRingTone = useCallback(async () => {
+    const sound = ringSoundRef.current;
+    if (!sound) return;
+    ringSoundRef.current = null;
+    try {
+      await sound.stopAsync();
+    } catch {
+      // Ignore stop errors while ending ringtone playback.
+    }
+    try {
+      await sound.unloadAsync();
+    } catch {
+      // Ignore unload errors during ringtone cleanup.
+    }
+  }, []);
+
+  const startIncomingRingTone = useCallback(async () => {
+    if (ringSoundRef.current) return;
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        staysActiveInBackground: false,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        incomingRingTone,
+        {
+          shouldPlay: true,
+          isLooping: true,
+          volume: 0.75,
+        },
+        undefined,
+        false,
+      );
+      ringSoundRef.current = sound;
+    } catch (ringError) {
+      console.warn('[call] failed to start incoming ringtone', ringError);
     }
   }, []);
 
@@ -360,10 +405,12 @@ export default function CallSessionScreen() {
       myId === session.callee_id;
     if (!isIncomingRingingForMe) {
       Vibration.cancel();
+      void stopIncomingRingTone();
       return;
     }
 
     Vibration.vibrate(350);
+    void startIncomingRingTone();
     const interval = setInterval(() => {
       Vibration.vibrate(350);
     }, 1400);
@@ -371,8 +418,9 @@ export default function CallSessionScreen() {
     return () => {
       clearInterval(interval);
       Vibration.cancel();
+      void stopIncomingRingTone();
     };
-  }, [myId, session?.callee_id, session?.id, session?.status]);
+  }, [myId, session?.callee_id, session?.id, session?.status, startIncomingRingTone, stopIncomingRingTone]);
 
   useEffect(() => {
     if (!session?.id || session.status !== 'ringing') return;
