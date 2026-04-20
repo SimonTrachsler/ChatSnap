@@ -2,6 +2,7 @@
 /// <reference path="../types/modules.d.ts" />
 import React, { type ErrorInfo, type ReactNode } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { reportError } from '@/lib/telemetry';
 
 interface Props {
   children: ReactNode;
@@ -22,6 +23,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    void reportError('error_boundary', error, {
+      componentStack: errorInfo.componentStack ?? null,
+    });
     if (__DEV__) {
       console.error('ErrorBoundary caught:', error, errorInfo);
     }

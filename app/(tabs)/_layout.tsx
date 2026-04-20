@@ -30,7 +30,7 @@ export default function TabsLayout() {
       return;
     }
     await refreshPendingIncoming();
-    await refreshUnreadMessages();
+    await refreshUnreadMessages({ force: true });
   }, [userId, refreshPendingIncoming, refreshUnreadMessages, setUnreadMessages]);
 
   useEffect(() => { refreshPendingIncoming(); }, [refreshPendingIncoming]);
@@ -119,7 +119,7 @@ export default function TabsLayout() {
           title: 'Friends',
           tabBarLabel: 'Friends',
           tabBarIcon: ({ color }) => (
-            <Ionicons name="people" size={26} color={color} />
+            <Ionicons name="people-outline" size={26} color={color} />
           ),
           tabBarBadge: pendingIncomingCount > 0
             ? (pendingIncomingCount > 99 ? '99+' : pendingIncomingCount)

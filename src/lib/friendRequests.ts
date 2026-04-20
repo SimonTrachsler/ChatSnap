@@ -8,14 +8,6 @@ import { supabase } from '@/lib/supabase';
 
 export type RelationshipState = 'already_friends' | 'outgoing_pending' | 'incoming_pending' | 'none';
 
-export type IncomingRequestRow = {
-  id: string;
-  requester_id: string;
-  receiver_id: string;
-  created_at: string;
-  requester: { username: string | null; email?: string | null; avatar_url?: string | null } | null;
-};
-
 export type FriendRow = {
   id: string;
   user_id: string;
@@ -200,22 +192,6 @@ export async function declineFriendRequest(requestId: string): Promise<{ error: 
     .update({ status: 'declined' })
     .eq('id', requestId);
   return { error: error as SupabaseError | null };
-}
-
-/**
- * List incoming pending requests for the current user (receiver_id = currentUserId).
- */
-export async function listIncomingRequests(currentUserId: string): Promise<{
-  data: IncomingRequestRow[] | null;
-  error: SupabaseError | null;
-}> {
-  const { data, error } = await supabase
-    .from('friend_requests')
-    .select('id, requester_id, receiver_id, created_at, requester:profiles!requester_id(username, email, avatar_url)')
-    .eq('receiver_id', currentUserId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
-  return { data: (data ?? []) as IncomingRequestRow[], error: error as SupabaseError | null };
 }
 
 /**

@@ -4,8 +4,11 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { reportError } from '@/lib/telemetry';
 
 const USER_PHOTOS_BUCKET = 'user-photos';
+const MAX_UPLOAD_ATTEMPTS = 3;
+const BASE_RETRY_DELAY_MS = 300;
 
 type StorageErrorLike = {
   message?: string;
@@ -34,7 +37,10 @@ export class StorageUploadError extends Error {
 }
 
 function logStorageError(action: string, bucket: string, path: string, error: StorageErrorLike): void {
-  console.error(`[uploadHelper] ${action} failed`, {
+  const lowerMessage = (error.message ?? '').toLowerCase();
+  const isMissingBucket = lowerMessage.includes('bucket not found');
+
+  const payload = {
     bucket,
     path,
     message: error.message ?? null,
@@ -42,7 +48,82 @@ function logStorageError(action: string, bucket: string, path: string, error: St
     details: error.details ?? null,
     hint: error.hint ?? null,
     name: error.name ?? null,
-  });
+  };
+
+  if (isMissingBucket) {
+    console.warn(`[uploadHelper] ${action} failed`, payload);
+    return;
+  }
+
+  console.error(`[uploadHelper] ${action} failed`, payload);
+  void reportError('upload_helper_storage_error', error, payload);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(attempt: number): number {
+  const exp = BASE_RETRY_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1));
+  const jitter = Math.floor(Math.random() * 120);
+  return exp + jitter;
+}
+
+function isRetryableStorageError(error: StorageErrorLike): boolean {
+  const lowerMsg = (error.message ?? '').toLowerCase();
+  const lowerCode = (error.code ?? '').toLowerCase();
+  return (
+    lowerMsg.includes('network') ||
+    lowerMsg.includes('timeout') ||
+    lowerMsg.includes('failed to fetch') ||
+    lowerMsg.includes('temporarily unavailable') ||
+    lowerMsg.includes('connection') ||
+    lowerCode === '408' ||
+    lowerCode === '429' ||
+    lowerCode === '500' ||
+    lowerCode === '502' ||
+    lowerCode === '503' ||
+    lowerCode === '504'
+  );
+}
+
+function isAlreadyExistsStorageError(error: StorageErrorLike): boolean {
+  const lowerMsg = (error.message ?? '').toLowerCase();
+  return lowerMsg.includes('already exists') || lowerMsg.includes('duplicate');
+}
+
+type UploadPayload = Uint8Array | ArrayBuffer | Blob | File;
+
+type UploadOptions = {
+  contentType?: string;
+  upsert?: boolean;
+};
+
+export async function uploadToBucketWithRetry(
+  bucket: string,
+  path: string,
+  payload: UploadPayload,
+  options: UploadOptions,
+): Promise<void> {
+  let lastError: StorageErrorLike | null = null;
+
+  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+    const { error } = await supabase.storage.from(bucket).upload(path, payload, options);
+    if (!error) return;
+
+    // If a previous attempt likely succeeded but response handling failed,
+    // a duplicate-path error on retry is effectively a success for upsert:false flows.
+    if (options.upsert === false && isAlreadyExistsStorageError(error)) return;
+
+    lastError = error;
+    const canRetry = attempt < MAX_UPLOAD_ATTEMPTS && isRetryableStorageError(error);
+    if (!canRetry) break;
+    await sleep(getRetryDelayMs(attempt));
+  }
+
+  const normalizedError = lastError ?? { message: 'Storage upload failed.' };
+  logStorageError('uploadToBucketWithRetry', bucket, path, normalizedError);
+  throw new StorageUploadError(bucket, path, normalizedError);
 }
 
 /**
@@ -102,22 +183,13 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 export async function uploadBase64ToUserPhotos(base64: string, path: string): Promise<void> {
   const trimmed = base64.replace(/^data:image\/\w+;base64,/, '').trim();
   if (!trimmed.length) throw new Error('Image file is empty.');
-  if (__DEV__) {
-    console.log('[uploadHelper] uploading to user-photos', {
-      path,
-      base64Length: trimmed.length,
-    });
-  }
   const binary = atob(trimmed);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const { error } = await supabase.storage
-    .from(USER_PHOTOS_BUCKET)
-    .upload(path, bytes, { contentType: 'image/jpeg', upsert: false });
-  if (error) {
-    logStorageError('uploadBase64ToUserPhotos', USER_PHOTOS_BUCKET, path, error);
-    throw new StorageUploadError(USER_PHOTOS_BUCKET, path, error);
-  }
+  await uploadToBucketWithRetry(USER_PHOTOS_BUCKET, path, bytes, {
+    contentType: 'image/jpeg',
+    upsert: false,
+  });
 }
 
 /**
@@ -130,9 +202,15 @@ export async function uploadImageFromUri(uri: string, path: string): Promise<voi
 }
 
 export async function removeUserPhotoUpload(path: string): Promise<void> {
-  const { error } = await supabase.storage.from(USER_PHOTOS_BUCKET).remove([path]);
-  if (error) {
-    logStorageError('removeUserPhotoUpload', USER_PHOTOS_BUCKET, path, error);
-    throw new StorageUploadError(USER_PHOTOS_BUCKET, path, error);
+  let lastError: StorageErrorLike | null = null;
+  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+    const { error } = await supabase.storage.from(USER_PHOTOS_BUCKET).remove([path]);
+    if (!error) return;
+    lastError = error;
+    if (attempt >= MAX_UPLOAD_ATTEMPTS || !isRetryableStorageError(error)) break;
+    await sleep(getRetryDelayMs(attempt));
   }
+  const normalizedError = lastError ?? { message: 'Storage cleanup failed.' };
+  logStorageError('removeUserPhotoUpload', USER_PHOTOS_BUCKET, path, normalizedError);
+  throw new StorageUploadError(USER_PHOTOS_BUCKET, path, normalizedError);
 }

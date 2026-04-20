@@ -12,6 +12,38 @@ type DiscoverUserRow = {
   avatar_url?: unknown;
 };
 
+type GetDiscoverUsersOptions = {
+  forceRefresh?: boolean;
+};
+
+const DISCOVER_CACHE_TTL_MS = 20_000;
+
+type DiscoverCacheEntry = {
+  data: DiscoverUser[];
+  ts: number;
+};
+
+const discoverCache = new Map<string, DiscoverCacheEntry>();
+const discoverInFlight = new Map<string, Promise<DiscoverUser[]>>();
+
+function getDiscoverCacheKey(limit: number, currentUserId?: string): string {
+  return `${currentUserId ?? 'anonymous'}:${Math.max(1, limit)}`;
+}
+
+function readDiscoverCache(key: string): DiscoverUser[] | null {
+  const cached = discoverCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.ts > DISCOVER_CACHE_TTL_MS) {
+    discoverCache.delete(key);
+    return null;
+  }
+  return cached.data;
+}
+
+function writeDiscoverCache(key: string, data: DiscoverUser[]): void {
+  discoverCache.set(key, { data, ts: Date.now() });
+}
+
 function normalizeDiscoverUsers(rows: unknown): DiscoverUser[] {
   if (!Array.isArray(rows)) return [];
 
@@ -49,17 +81,49 @@ async function getFallbackDiscoverUsers(limit: number, currentUserId?: string): 
   return normalizeDiscoverUsers(data);
 }
 
-export async function getDiscoverUsers(limit: number = 20, currentUserId?: string): Promise<DiscoverUser[]> {
-  const { data, error } = await callRpc<DiscoverUser[]>('get_discover_users', {
-    p_limit: limit,
-  });
-  if (error) {
-    console.error('[discover] get_discover_users error:', error.message);
-    return getFallbackDiscoverUsers(limit, currentUserId);
+export async function getDiscoverUsers(
+  limit: number = 20,
+  currentUserId?: string,
+  options?: GetDiscoverUsersOptions,
+): Promise<DiscoverUser[]> {
+  const key = getDiscoverCacheKey(limit, currentUserId);
+  const pending = discoverInFlight.get(key);
+  if (pending) {
+    return pending;
   }
-  const rows = normalizeDiscoverUsers(data);
-  if (rows.length > 0) {
-    return currentUserId ? rows.filter((row) => row.id !== currentUserId) : rows;
+
+  if (!options?.forceRefresh) {
+    const cached = readDiscoverCache(key);
+    if (cached) {
+      return cached;
+    }
   }
-  return data == null ? getFallbackDiscoverUsers(limit, currentUserId) : rows;
+
+  const nextRequest = (async () => {
+    const { data, error } = await callRpc<DiscoverUser[]>('get_discover_users', {
+      p_limit: limit,
+    });
+    if (error) {
+      console.error('[discover] get_discover_users error:', error.message);
+      const fallback = await getFallbackDiscoverUsers(limit, currentUserId);
+      writeDiscoverCache(key, fallback);
+      return fallback;
+    }
+    const rows = normalizeDiscoverUsers(data);
+    if (rows.length > 0) {
+      const filtered = currentUserId ? rows.filter((row) => row.id !== currentUserId) : rows;
+      writeDiscoverCache(key, filtered);
+      return filtered;
+    }
+    const fallback = data == null ? await getFallbackDiscoverUsers(limit, currentUserId) : rows;
+    writeDiscoverCache(key, fallback);
+    return fallback;
+  })();
+
+  discoverInFlight.set(key, nextRequest);
+  try {
+    return await nextRequest;
+  } finally {
+    discoverInFlight.delete(key);
+  }
 }

@@ -1,42 +1,20 @@
 /**
  * Shared snap-sending and user-gallery logic.
- * - saveToUserGallery: upload to user-photos bucket + insert user_photos row (best-effort).
  * - createSnapWithImage: create snap row, upload image to snaps bucket, set media_url.
  * Uses the same image bytes where possible to avoid duplicate uploads.
  */
 
 import type { Database } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { insertUserPhotoRecord } from '@/lib/userPhotos';
+import { uploadToBucketWithRetry } from '@/lib/uploadHelper';
+import { reportError, trackEvent } from '@/lib/telemetry';
 
-const USER_PHOTOS_BUCKET = 'user-photos';
 const SNAPS_BUCKET = 'snaps';
 
 type ImagePayload = Uint8Array | Blob;
 
 type SnapsInsert = Database['public']['Tables']['snaps']['Insert'];
 type SnapsUpdate = Database['public']['Tables']['snaps']['Update'];
-
-/** Upload image to user-photos and insert user_photos row. Returns storage path or null. Does not throw. */
-export async function saveToUserGallery(
-  userId: string,
-  imageBytes: ImagePayload
-): Promise<string | null> {
-  const path = `${userId}/photo-${Date.now()}.jpg`;
-  const { error: uploadError } = await supabase.storage
-    .from(USER_PHOTOS_BUCKET)
-    .upload(path, imageBytes, { contentType: 'image/jpeg', upsert: false });
-
-  if (uploadError) return null;
-
-  try {
-    await insertUserPhotoRecord(userId, path);
-  } catch {
-    return null;
-  }
-
-  return path;
-}
 
 /**
  * Create a snap for the recipient and upload the image to the snaps bucket.
@@ -61,13 +39,18 @@ export async function createSnapWithImage(
   const filename = 'photo-' + Date.now() + '.jpg';
   const storagePath = `${snapId}/${filename}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from(SNAPS_BUCKET)
-    .upload(storagePath, imageBytes, { contentType: 'image/jpeg', upsert: false });
-
-  if (uploadError) {
+  try {
+    await uploadToBucketWithRetry(SNAPS_BUCKET, storagePath, imageBytes, {
+      contentType: 'image/jpeg',
+      upsert: false,
+    });
+  } catch (uploadError) {
     await supabase.from('snaps').delete().eq('id', snapId);
-    throw new Error('Upload fehlgeschlagen: ' + uploadError.message);
+    void reportError('create_snap_with_image_upload_failed', uploadError, {
+      snapId,
+      storagePath,
+    });
+    throw new Error('Upload fehlgeschlagen: ' + (uploadError instanceof Error ? uploadError.message : String(uploadError)));
   }
 
   const update: SnapsUpdate = { media_url: storagePath };
@@ -75,8 +58,20 @@ export async function createSnapWithImage(
   const { error: updateError } = await (supabase as any).from('snaps').update(update).eq('id', snapId);
 
   if (updateError) {
+    await Promise.allSettled([
+      supabase.storage.from(SNAPS_BUCKET).remove([storagePath]),
+      supabase.from('snaps').delete().eq('id', snapId),
+    ]);
+    void reportError('create_snap_with_image_update_failed', updateError, {
+      snapId,
+      storagePath,
+    });
     throw new Error('Could not save media URL: ' + updateError.message);
   }
 
+  void trackEvent('snap_created', {
+    snapId,
+    recipientId,
+  });
   return snapId;
 }

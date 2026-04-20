@@ -1,16 +1,19 @@
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, Image, Pressable, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Image, Pressable, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { addScreenshotListener } from 'expo-screen-capture';
 import { supabase, getUpdateClient } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Avatar } from '@/ui/components/Avatar';
 import { colors, radius } from '@/ui/theme';
+import { logSnapScreenshotEvent } from '@/lib/socialFeatures';
 
 type Snap = {
   id: string;
   opened: boolean;
   media_url: string | null;
+  is_sensitive: boolean;
   recipient_id: string;
   sender_id: string;
 };
@@ -42,7 +45,7 @@ export default function SnapDetailScreen() {
     (async () => {
       const { data, error: fetchError } = await supabase
         .from('snaps')
-        .select('id, opened, media_url, recipient_id, sender_id')
+        .select('id, opened, media_url, is_sensitive, recipient_id, sender_id')
         .eq('id', id)
         .eq('recipient_id', userId)
         .single();
@@ -84,6 +87,16 @@ export default function SnapDetailScreen() {
 
     return () => { cancelled = true; };
   }, [id, userId]);
+
+  useEffect(() => {
+    if (!snap?.id || !snap.is_sensitive) return;
+    const listener = addScreenshotListener(() => {
+      logSnapScreenshotEvent(snap.id, Platform.OS).catch(() => {});
+    });
+    return () => {
+      listener.remove();
+    };
+  }, [snap?.id, snap?.is_sensitive]);
 
   async function handleTapToClose() {
     if (!snap || snap.opened || hasMarkedOpened.current) return;
@@ -135,7 +148,7 @@ export default function SnapDetailScreen() {
         <Text style={styles.senderName}>{senderName ?? 'Unknown'}</Text>
       </View>
       <View style={styles.hintOverlay}>
-        <Text style={styles.hintText}>Tap to close</Text>
+        <Text style={styles.hintText}>{snap.is_sensitive ? 'Sensitive snap - screenshot detection active' : 'Tap to close'}</Text>
       </View>
     </Pressable>
   );

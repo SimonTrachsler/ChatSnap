@@ -1,16 +1,17 @@
 import { callRpc, getInsertSelectSingleClient, supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
+import { reportError, trackEvent } from '@/lib/telemetry';
 
 type ChatMessageRow = Database['public']['Tables']['chat_messages']['Row'];
 type ChatMessageInsert = Database['public']['Tables']['chat_messages']['Insert'];
 type ChatThreadRow = Database['public']['Tables']['chat_threads']['Row'];
 type LastMessagePreview = Pick<ChatMessageRow, 'body' | 'created_at' | 'message_type' | 'snap_id'>;
-type ChatMessageWithSnap = Pick<ChatMessageRow, 'id' | 'thread_id' | 'sender_id' | 'body' | 'created_at' | 'message_type' | 'snap_id'> & {
+type ChatMessageWithSnap = Partial<Pick<ChatMessageRow, 'id' | 'thread_id' | 'sender_id' | 'body' | 'created_at' | 'message_type' | 'snap_id' | 'media_path' | 'metadata' | 'edited_at' | 'deleted_at' | 'scheduled_for'>> & {
   snap?: { opened?: boolean } | { opened?: boolean }[] | null;
 };
 const chatMessagesInsertClient = getInsertSelectSingleClient<ChatMessageInsert, ChatMessageRow>('chat_messages');
 
-export type ChatMessage = Pick<ChatMessageRow, 'id' | 'thread_id' | 'sender_id' | 'body' | 'created_at' | 'message_type' | 'snap_id'> & {
+export type ChatMessage = Pick<ChatMessageRow, 'id' | 'thread_id' | 'sender_id' | 'body' | 'created_at' | 'message_type' | 'snap_id' | 'media_path' | 'metadata' | 'edited_at' | 'deleted_at' | 'scheduled_for'> & {
   /** Derived from snaps.opened for message_type === 'snap' */
   snapOpened?: boolean;
 };
@@ -21,6 +22,48 @@ type ChatLikeError = {
   message?: string;
   code?: string;
 };
+
+const CHAT_MESSAGE_SELECT_EXTENDED =
+  'id, thread_id, sender_id, body, created_at, message_type, snap_id, media_path, metadata, edited_at, deleted_at, scheduled_for';
+const CHAT_MESSAGE_SELECT_LEGACY =
+  'id, thread_id, sender_id, body, created_at, message_type, snap_id';
+const CHAT_MESSAGE_LIST_EXTENDED = `${CHAT_MESSAGE_SELECT_EXTENDED}, snap:snaps!snap_id(opened)`;
+const CHAT_MESSAGE_LIST_LEGACY = `${CHAT_MESSAGE_SELECT_LEGACY}, snap:snaps!snap_id(opened)`;
+
+function isMissingChatColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as ChatLikeError;
+  const code = e.code ?? '';
+  const message = (e.message ?? '').toLowerCase();
+  if (code !== '42703') return false;
+  return message.includes('chat_messages.deleted_at')
+    || message.includes('chat_messages.media_path')
+    || message.includes('chat_messages.metadata')
+    || message.includes('chat_messages.edited_at')
+    || message.includes('chat_messages.scheduled_for');
+}
+
+function mapChatMessageRow(row: ChatMessageWithSnap): ChatMessage {
+  const snap = row.snap;
+  let snapOpened: boolean | undefined;
+  if (Array.isArray(snap)) snapOpened = !!snap[0]?.opened;
+  else if (snap) snapOpened = !!snap.opened;
+  return {
+    id: row.id ?? '',
+    thread_id: row.thread_id ?? '',
+    sender_id: row.sender_id ?? '',
+    body: row.body ?? '',
+    created_at: row.created_at ?? new Date().toISOString(),
+    message_type: row.message_type ?? 'text',
+    snap_id: row.snap_id ?? null,
+    media_path: row.media_path ?? null,
+    metadata: row.metadata ?? {},
+    edited_at: row.edited_at ?? null,
+    deleted_at: row.deleted_at ?? null,
+    scheduled_for: row.scheduled_for ?? null,
+    snapOpened,
+  };
+}
 
 export function isOnlyFriendsChatError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -72,39 +115,27 @@ export async function listMessages(
   limit: number = DEFAULT_LIMIT,
   before?: string
 ): Promise<ChatMessage[]> {
-  let q = supabase
-    .from('chat_messages')
-    .select('id, thread_id, sender_id, body, created_at, message_type, snap_id, snap:snaps!snap_id(opened)')
-    .eq('thread_id', threadId)
-    .order('created_at', { ascending: true })
-    .limit(limit);
-  if (before) {
-    q = q.lt('created_at', before);
+  const runQuery = (selectClause: string) => {
+    let q = supabase
+      .from('chat_messages')
+      .select(selectClause)
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    if (before) q = q.lt('created_at', before);
+    return q;
+  };
+
+  let res = await runQuery(CHAT_MESSAGE_LIST_EXTENDED);
+  if (res.error && isMissingChatColumnError(res.error)) {
+    res = await runQuery(CHAT_MESSAGE_LIST_LEGACY);
   }
-  const { data, error } = await q;
-  if (error) throw error;
-  const rows: ChatMessageWithSnap[] = ((data ?? []) as ChatMessageWithSnap[]).filter(
+  if (res.error) throw res.error;
+
+  const rows = ((res.data ?? []) as ChatMessageWithSnap[]).filter(
     (row): row is ChatMessageWithSnap => Boolean(row && typeof row === 'object' && row.id),
   );
-  return rows.map((row) => {
-    const { snap } = row;
-    let snapOpened: boolean | undefined;
-    if (Array.isArray(snap)) {
-      snapOpened = !!snap[0]?.opened;
-    } else if (snap) {
-      snapOpened = !!snap.opened;
-    }
-    return {
-      id: row.id,
-      thread_id: row.thread_id,
-      sender_id: row.sender_id,
-      body: row.body,
-      created_at: row.created_at,
-      message_type: row.message_type,
-      snap_id: row.snap_id,
-      snapOpened,
-    };
-  });
+  return rows.map(mapChatMessageRow);
 }
 
 /**
@@ -127,14 +158,22 @@ export async function sendMessage(
   };
   const { data, error } = await chatMessagesInsertClient
     .insert(messageInsert)
-    .select('id, thread_id, sender_id, body, created_at, message_type, snap_id')
+    .select(CHAT_MESSAGE_SELECT_LEGACY)
     .single();
   if (error) {
     console.error('[chat] sendMessage error:', { message: error.message, code: error.code });
+    void reportError('chat_send_message_insert_failed', error, {
+      threadId,
+      bodyLength: body.length,
+    });
     throw error;
   }
   invalidateThreadsCache();
-  return data as ChatMessage;
+  void trackEvent('chat_message_inserted', {
+    threadId,
+    bodyLength: body.length,
+  });
+  return mapChatMessageRow(data as ChatMessageWithSnap);
 }
 
 /**
@@ -179,19 +218,6 @@ export async function markThreadRead(threadId: string): Promise<void> {
 }
 
 /**
- * Returns the total message count in the shared thread with another user.
- */
-export async function getMessageCount(otherUserId: string): Promise<number> {
-  const threadId = await getOrCreateThread(otherUserId);
-  const { count, error } = await supabase
-    .from('chat_messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('thread_id', threadId);
-  if (error) throw error;
-  return count ?? 0;
-}
-
-/**
  * Insert a snap-type message into a chat thread.
  */
 export async function sendSnapMessage(
@@ -211,14 +237,22 @@ export async function sendSnapMessage(
   };
   const { data, error } = await chatMessagesInsertClient
     .insert(messageInsert)
-    .select('id, thread_id, sender_id, body, created_at, message_type, snap_id')
+    .select(CHAT_MESSAGE_SELECT_LEGACY)
     .single();
   if (error) {
     console.error('[chat] sendSnapMessage error:', { message: error.message, code: error.code });
+    void reportError('chat_send_snap_message_failed', error, {
+      threadId,
+      snapId,
+    });
     throw error;
   }
   invalidateThreadsCache();
-  return data as ChatMessage;
+  void trackEvent('chat_snap_message_inserted', {
+    threadId,
+    snapId,
+  });
+  return mapChatMessageRow(data as ChatMessageWithSnap);
 }
 
 export type ThreadWithPreview = {
@@ -257,6 +291,37 @@ export async function listThreadsWithPreview(
     return _threadsCache.data;
   }
 
+  type RpcRow = {
+    thread_id: string;
+    other_user_id: string;
+    other_username: string | null;
+    other_avatar_url: string | null;
+    preview_text: string;
+    last_at: string;
+    last_type: string;
+    last_snap_opened: boolean | null;
+    has_unread: boolean;
+  };
+
+  const { data: rpcRows, error: rpcError } = await callRpc<RpcRow[]>('list_threads_with_preview', {
+    p_limit: 50,
+  });
+  if (!rpcError && Array.isArray(rpcRows)) {
+    const mapped = rpcRows.map((row) => ({
+      threadId: row.thread_id,
+      otherUserId: row.other_user_id,
+      otherUsername: row.other_username,
+      otherAvatarUrl: row.other_avatar_url,
+      previewText: row.preview_text ?? '',
+      lastAt: row.last_at,
+      lastType: row.last_type === 'snap' ? 'snap' : 'text',
+      lastSnapOpened: row.last_snap_opened ?? undefined,
+      hasUnread: !!row.has_unread,
+    } satisfies ThreadWithPreview));
+    _threadsCache = { userId: myUserId, data: mapped, ts: Date.now() };
+    return mapped;
+  }
+
   const { data: threads, error: threadsError } = await supabase
     .from('chat_threads')
     .select('id, user_a, user_b, created_at')
@@ -267,7 +332,6 @@ export async function listThreadsWithPreview(
 
   const threadRows: ChatThreadRow[] = threads;
 
-  // Batch-fetch all other-user profiles in one query
   const otherIds = threadRows.map((t) => (t.user_a === myUserId ? t.user_b : t.user_a));
   const uniqueOtherIds = [...new Set(otherIds)];
   const { data: profileRows } = await supabase
@@ -279,12 +343,10 @@ export async function listThreadsWithPreview(
     profileMap.set(p.id, { username: p.username ?? null, avatar_url: p.avatar_url ?? null });
   }
 
-  // Process all threads in parallel
   const results = await Promise.all(
     threadRows.map(async (t) => {
       const otherId = t.user_a === myUserId ? t.user_b : t.user_a;
 
-      // Run last-message and unread-count queries in parallel
       const [lastMsgRes, unreadRes] = await Promise.all([
         supabase
           .from('chat_messages')

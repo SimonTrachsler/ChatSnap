@@ -24,8 +24,3 @@ export const useAuthStore = create<AuthState>((set) => ({
   setLoading: (loading) => set({ loading }),
   setSessionExpired: (value) => set({ sessionExpired: value }),
 }));
-
-/** Convenience: eingeloggt = User vorhanden */
-export function useIsAuthenticated(): boolean {
-  return useAuthStore((s) => !!s.user);
-}

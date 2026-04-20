@@ -22,8 +22,8 @@ declare module 'react-native' {
     currentState?: string;
   };
   export const PermissionsAndroid: {
-    PERMISSIONS: { RECORD_AUDIO: string };
-    RESULTS: { GRANTED: string };
+    PERMISSIONS: Record<string, string>;
+    RESULTS: Record<string, string>;
     request: (permission: string) => Promise<string>;
   };
   export const Vibration: {

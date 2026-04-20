@@ -14,22 +14,16 @@
     "android": {
       "package": "com.chatsnap.app",
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "MODIFY_AUDIO_SETTINGS"
+        "CAMERA"
       ]
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.chatsnap.app",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Die App benoetigt Mikrofonzugriff fuer Audioanrufe."
-      }
+      "bundleIdentifier": "com.chatsnap.app"
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/favicon.png"
+      "output": "static"
     },
     "plugins": [
       "expo-router",

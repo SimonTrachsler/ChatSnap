@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
+  Image,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
@@ -12,13 +13,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
 import { useInboxBadgeStore } from '@/store/useInboxBadgeStore';
-import { createOutgoingCallSession, getCallAvailability, probeCallReadiness, subscribeToCallPresence } from '@/lib/calls';
 import {
   canOpenChatWithUser,
   getOrCreateThread,
@@ -29,24 +31,36 @@ import {
   subscribeToMessages,
   type ChatMessage,
 } from '@/lib/chat';
+import {
+  deleteOwnChatMessage,
+  dispatchDueScheduledMessages,
+  getChatMediaSignedUrl,
+  listMessageReactions,
+  scheduleChatMessage,
+  sendRichChatMessage,
+  toggleMessageReaction,
+  updateOwnChatMessage,
+  uploadChatImageFromUri,
+  type MessageReactionSummary,
+} from '@/lib/socialFeatures';
 import { supabase } from '@/lib/supabase';
 import { supabaseErrorToUserMessage } from '@/lib/supabaseErrors';
 import { Avatar } from '@/ui/components/Avatar';
 import { colors, radius, spacing } from '@/ui/theme';
 import { getFloatingTabBarMetrics } from '@/ui/tabBar';
 
-type ScrollableListRef = { scrollToEnd?: (options: { animated?: boolean }) => void };
 const CHAT_NOT_FRIENDS_MESSAGE = 'Chat is only available for friends.';
+const REACTIONS = ['👍', '❤️', '😂', '🔥'];
+const SCHEDULE_STEPS: Array<0 | 5 | 30> = [0, 5, 30];
+
+type ThreadChatScreenProps = {
+  backHref: '/(tabs)/inbox' | '/(tabs)/friends';
+  showProfileLink?: boolean;
+};
 
 function normalizeUserIdParam(value: string | string[] | undefined): string | null {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-  if (Array.isArray(value) && typeof value[0] === 'string') {
-    const trimmed = value[0].trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
+  if (typeof value === 'string') return value.trim() || null;
+  if (Array.isArray(value)) return value[0]?.trim() || null;
   return null;
 }
 
@@ -54,10 +68,67 @@ function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-type ThreadChatScreenProps = {
-  backHref: '/(tabs)/inbox' | '/(tabs)/friends';
-  showProfileLink?: boolean;
+function scheduleLabel(minutes: 0 | 5 | 30): string {
+  return minutes === 0 ? 'Now' : `+${minutes}m`;
+}
+
+function getKeyboardInsetFromBottom(event: unknown): number {
+  const end = (event as { endCoordinates?: { height?: number; screenY?: number } } | undefined)?.endCoordinates;
+  if (typeof end?.screenY === 'number' && Number.isFinite(end.screenY)) {
+    return Math.max(0, Dimensions.get('window').height - end.screenY);
+  }
+  if (typeof end?.height === 'number' && Number.isFinite(end.height)) {
+    return Math.max(0, end.height);
+  }
+  const metrics = (Keyboard as unknown as { metrics?: () => { height?: number } | undefined }).metrics?.();
+  return typeof metrics?.height === 'number' && Number.isFinite(metrics.height) ? Math.max(0, metrics.height) : 0;
+}
+
+type SnapVisualState = {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  accentColor: string;
+  tintBackground: string;
 };
+
+function getSnapVisualState(isSent: boolean, snapOpened: boolean): SnapVisualState {
+  if (isSent) {
+    if (snapOpened) {
+      return {
+        icon: 'checkmark-done-outline',
+        title: 'Opened',
+        subtitle: 'Friend viewed your snap',
+        accentColor: '#C7D0DB',
+        tintBackground: 'rgba(148,163,184,0.16)',
+      };
+    }
+    return {
+      icon: 'paper-plane-outline',
+      title: 'Sent',
+      subtitle: 'Waiting for friend to open',
+      accentColor: '#AEB8C4',
+      tintBackground: 'rgba(148,163,184,0.12)',
+    };
+  }
+
+  if (snapOpened) {
+    return {
+      icon: 'eye-off-outline',
+      title: 'Opened',
+      subtitle: 'You already viewed this snap',
+      accentColor: '#AFC8FF',
+      tintBackground: 'rgba(175,200,255,0.12)',
+    };
+  }
+  return {
+    icon: 'sparkles-outline',
+    title: 'New snap',
+    subtitle: 'Tap to open',
+    accentColor: '#FFB2F5',
+    tintBackground: 'rgba(255,178,245,0.12)',
+  };
+}
 
 export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadChatScreenProps) {
   const params = useLocalSearchParams<{ userId?: string | string[] }>();
@@ -78,70 +149,76 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [startingCall, setStartingCall] = useState(false);
-  const [callReady, setCallReady] = useState<boolean>(true);
-  const [callReadyMessage, setCallReadyMessage] = useState<string | null>(null);
-  const [callAvailable, setCallAvailable] = useState<boolean>(true);
-  const [callAvailabilityMessage, setCallAvailabilityMessage] = useState<string | null>(null);
-  const [checkingCallReadiness, setCheckingCallReadiness] = useState(false);
-  const [checkingCallAvailability, setCheckingCallAvailability] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-
-  const listRef = useRef<React.ElementRef<typeof FlatList>>(null);
-  const loadRequestRef = useRef(0);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [scheduleMinutes, setScheduleMinutes] = useState<0 | 5 | 30>(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
+  const [editingBusy, setEditingBusy] = useState(false);
+  const [reactions, setReactions] = useState<Record<string, MessageReactionSummary[]>>({});
+  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  const listRef = useRef<{ scrollToEnd?: (options?: { animated?: boolean }) => void } | null>(null);
+  const requestRef = useRef(0);
+  const reactionKeyRef = useRef('');
+  const resolvedMediaIdsRef = useRef(new Set<string>());
+  const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduledDispatchTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const displayName = username ?? (friendId ? `${friendId.slice(0, 8)}...` : 'Chat');
-
-  const handleBack = useCallback(() => {
-    router.replace(backHref);
-  }, [backHref, router]);
+  const handleBack = useCallback(() => router.replace(backHref), [backHref, router]);
+  const onCycleSchedule = useCallback(() => {
+    const idx = SCHEDULE_STEPS.indexOf(scheduleMinutes);
+    setScheduleMinutes(SCHEDULE_STEPS[(idx + 1) % SCHEDULE_STEPS.length]);
+  }, [scheduleMinutes]);
+  const queueMarkThreadRead = useCallback((targetThreadId: string) => {
+    if (markReadTimerRef.current) return;
+    markReadTimerRef.current = setTimeout(() => {
+      markReadTimerRef.current = null;
+      markThreadRead(targetThreadId).then(() => refreshUnreadMessages({ force: true })).catch(() => {});
+    }, 180);
+  }, [refreshUnreadMessages]);
+  const queueScheduledDispatch = useCallback((scheduledForIso: string) => {
+    const dueAtMs = new Date(scheduledForIso).getTime();
+    if (!Number.isFinite(dueAtMs)) return;
+    const delayMs = Math.max(400, dueAtMs - Date.now() + 400);
+    const timer = setTimeout(() => {
+      scheduledDispatchTimersRef.current.delete(timer);
+      dispatchDueScheduledMessages().then(() => refreshUnreadMessages({ force: true })).catch(() => {});
+    }, delayMs);
+    scheduledDispatchTimersRef.current.add(timer);
+  }, [refreshUnreadMessages]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!friendId) {
-      setUsername(null);
-      setFriendAvatar(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-    supabase
-      .from('profiles')
-      .select('username, avatar_url')
-      .eq('id', friendId)
-      .maybeSingle()
-      .then((res) => {
-        if (cancelled) return;
-        const data = res.data as { username?: string | null; avatar_url?: string | null } | null;
-        setUsername(data?.username ?? null);
-        setFriendAvatar(data?.avatar_url ?? null);
-      });
+    if (!friendId) return;
+    supabase.from('profiles').select('username, avatar_url').eq('id', friendId).maybeSingle().then((res) => {
+      if (cancelled) return;
+      const profile = res.data as { username?: string | null; avatar_url?: string | null } | null;
+      setUsername(profile?.username ?? null);
+      setFriendAvatar(profile?.avatar_url ?? null);
+    });
     return () => {
       cancelled = true;
     };
   }, [friendId]);
 
-  const loadThreadAndMessages = useCallback(async () => {
-    const requestId = loadRequestRef.current + 1;
-    loadRequestRef.current = requestId;
-    const isStale = () => loadRequestRef.current !== requestId;
-
+  const loadThread = useCallback(async () => {
+    const req = requestRef.current + 1;
+    requestRef.current = req;
+    const stale = () => requestRef.current !== req;
     if (!myId || !friendId || myId === friendId) {
-      if (isStale()) return;
+      if (stale()) return;
+      setThreadError(myId && friendId && myId === friendId ? 'You cannot chat with yourself.' : null);
       setThreadId(null);
       setMessages([]);
-      setThreadError(myId && friendId && myId === friendId ? 'You cannot chat with yourself.' : null);
       setLoading(false);
       setActiveThreadId(null);
       return;
     }
-
-    if (isStale()) return;
     setLoading(true);
     setThreadError(null);
-
     try {
       const allowed = await canOpenChatWithUser(myId, friendId);
-      if (isStale()) return;
+      if (stale()) return;
       if (!allowed) {
         setThreadError(CHAT_NOT_FRIENDS_MESSAGE);
         setThreadId(null);
@@ -150,556 +227,397 @@ export function ThreadChatScreen({ backHref, showProfileLink = false }: ThreadCh
         handleBack();
         return;
       }
-
-      const tid = await getOrCreateThread(friendId);
-      if (isStale()) return;
-      setThreadId(tid);
-      setActiveThreadId(tid);
-
-      const list = await listMessages(tid);
-      if (isStale()) return;
+      const nextThreadId = await getOrCreateThread(friendId);
+      if (stale()) return;
+      setThreadId(nextThreadId);
+      setActiveThreadId(nextThreadId);
+      const list = await listMessages(nextThreadId);
+      if (stale()) return;
       setMessages(list);
-      markThreadRead(tid)
-        .then(() => refreshUnreadMessages())
-        .catch(() => {});
+      queueMarkThreadRead(nextThreadId);
     } catch (error) {
-      if (isStale()) return;
-      if (!isOnlyFriendsChatError(error)) {
-        console.error('[chat] loadThreadAndMessages error:', error);
-      }
+      if (stale()) return;
       const msg = isOnlyFriendsChatError(error) ? CHAT_NOT_FRIENDS_MESSAGE : supabaseErrorToUserMessage(error);
       setThreadError(msg);
       setThreadId(null);
       setMessages([]);
       setActiveThreadId(null);
-      if (isOnlyFriendsChatError(error)) {
-        handleBack();
-      }
     } finally {
-      if (!isStale()) setLoading(false);
+      if (!stale()) setLoading(false);
     }
-  }, [friendId, handleBack, myId, refreshUnreadMessages, setActiveThreadId]);
+  }, [friendId, handleBack, myId, queueMarkThreadRead, setActiveThreadId]);
 
-  useEffect(() => {
-    loadThreadAndMessages();
+  useFocusEffect(useCallback(() => {
+    loadThread();
     return () => {
-      loadRequestRef.current += 1;
+      requestRef.current += 1;
       setActiveThreadId(null);
     };
-  }, [loadThreadAndMessages, setActiveThreadId]);
+  }, [loadThread, setActiveThreadId]));
+
+  useEffect(() => () => {
+    if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+    for (const timer of scheduledDispatchTimersRef.current) clearTimeout(timer);
+    scheduledDispatchTimersRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    resolvedMediaIdsRef.current = new Set<string>();
+    setMediaUrls({});
+    reactionKeyRef.current = '';
+  }, [threadId]);
 
   useEffect(() => {
     if (!threadId) return;
     const unsub = subscribeToMessages(threadId, (msg) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      });
-      if (msg.sender_id !== myId) {
-        markThreadRead(threadId)
-          .then(() => refreshUnreadMessages())
-          .catch(() => {});
-      }
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      if (msg.sender_id !== myId) queueMarkThreadRead(threadId);
     });
     return unsub;
-  }, [myId, refreshUnreadMessages, threadId]);
+  }, [myId, queueMarkThreadRead, threadId]);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      (listRef.current as ScrollableListRef | null)?.scrollToEnd?.({ animated: true });
-    }
+    if (messages.length === 0) return;
+    const t = setTimeout(() => {
+      listRef.current?.scrollToEnd?.({ animated: true });
+    }, 80);
+    return () => clearTimeout(t);
   }, [messages.length]);
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    if (!threadId) return;
+    dispatchDueScheduledMessages().then(() => refreshUnreadMessages({ force: true })).catch(() => {});
+    const t = setInterval(() => {
+      dispatchDueScheduledMessages().then(() => refreshUnreadMessages({ force: true })).catch(() => {});
+    }, 8000);
+    return () => clearInterval(t);
+  }, [refreshUnreadMessages, threadId]);
+
+  useEffect(() => {
+    const ids = messages.map((m) => m.id);
+    if (!ids.length) {
+      setReactions({});
+      reactionKeyRef.current = '';
+      return;
+    }
+    const key = ids.join('|');
+    if (key === reactionKeyRef.current) return;
+    reactionKeyRef.current = key;
+    listMessageReactions(ids).then((res) => setReactions(res.byMessage)).catch(() => {});
+  }, [messages]);
+
+  useEffect(() => {
+    const mediaMessages = messages.filter((m) => !!m.media_path && !resolvedMediaIdsRef.current.has(m.id));
+    if (!mediaMessages.length) return;
+    let cancelled = false;
+    Promise.all(
+      mediaMessages.map(async (m) => {
+        if (!m.media_path) return null;
+        const signed = await getChatMediaSignedUrl(m.media_path, 7200);
+        return signed ? ([m.id, signed] as const) : ([m.id, null] as const);
+      }),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const pair of pairs) {
+        if (!pair) continue;
+        resolvedMediaIdsRef.current.add(pair[0]);
+        if (pair[1]) next[pair[0]] = pair[1];
+      }
+      if (Object.keys(next).length) setMediaUrls((prev) => ({ ...prev, ...next }));
+    }).catch(() => {});
     return () => {
-      showSub.remove();
-      hideSub.remove();
+      cancelled = true;
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    const setVisibleHeightFromEvent = (event: unknown) => {
+      setKeyboardHeight(getKeyboardInsetFromBottom(event));
+    };
+    if (Platform.OS === 'ios') {
+      const show = Keyboard.addListener('keyboardWillChangeFrame', ((event: unknown) => setVisibleHeightFromEvent(event)) as unknown as () => void);
+      const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardHeight(0));
+      return () => {
+        show.remove();
+        hide.remove();
+      };
+    }
+    const show = Keyboard.addListener('keyboardDidShow', ((event: unknown) => setVisibleHeightFromEvent(event)) as unknown as () => void);
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
     };
   }, []);
 
-  type CallStateSnapshot = {
-    readiness: boolean;
-    readinessMessage: string | null;
-    availability: boolean;
-    availabilityMessage: string | null;
-  };
+  const refreshReactions = useCallback(async () => {
+    const ids = messages.map((m) => m.id);
+    if (!ids.length) return;
+    const res = await listMessageReactions(ids);
+    setReactions(res.byMessage);
+  }, [messages]);
 
-  const refreshCallState = useCallback(
-    async (options?: { forceRefresh?: boolean; showLoading?: boolean }): Promise<CallStateSnapshot> => {
-      const forceRefresh = options?.forceRefresh === true;
-      const showLoading = options?.showLoading === true;
-
-      if (!friendId || !myId) {
-        const unavailableState: CallStateSnapshot = {
-          readiness: false,
-          readinessMessage: 'Audio calls are unavailable.',
-          availability: false,
-          availabilityMessage: 'Audio calls are unavailable.',
-        };
-        setCallReady(unavailableState.readiness);
-        setCallReadyMessage(unavailableState.readinessMessage);
-        setCallAvailable(unavailableState.availability);
-        setCallAvailabilityMessage(unavailableState.availabilityMessage);
-        setCheckingCallReadiness(false);
-        setCheckingCallAvailability(false);
-        return unavailableState;
-      }
-
-      if (showLoading) {
-        setCheckingCallReadiness(true);
-        setCheckingCallAvailability(true);
-      }
-
-      try {
-        const [readinessResult, availabilityResult] = await Promise.allSettled([
-          probeCallReadiness({ forceRefresh }),
-          getCallAvailability(friendId),
-        ]);
-
-        const nextState: CallStateSnapshot = {
-          readiness:
-            readinessResult.status === 'fulfilled'
-              ? readinessResult.value.success
-              : false,
-          readinessMessage:
-            readinessResult.status === 'fulfilled'
-              ? (readinessResult.value.message ?? null)
-              : 'Could not verify audio call configuration.',
-          availability:
-            availabilityResult.status === 'fulfilled'
-              ? availabilityResult.value.available
-              : false,
-          availabilityMessage:
-            availabilityResult.status === 'fulfilled'
-              ? availabilityResult.value.message
-              : 'Could not verify call availability.',
-        };
-
-        setCallReady(nextState.readiness);
-        setCallReadyMessage(nextState.readinessMessage);
-        setCallAvailable(nextState.availability);
-        setCallAvailabilityMessage(nextState.availabilityMessage);
-        return nextState;
-      } finally {
-        if (showLoading) {
-          setCheckingCallReadiness(false);
-          setCheckingCallAvailability(false);
-        }
-      }
-    },
-    [friendId, myId],
-  );
-
-  useEffect(() => {
-    void refreshCallState({ forceRefresh: false, showLoading: true });
-    if (!friendId || !myId) return undefined;
-
-    const refreshFromRealtime = () => {
-      void refreshCallState({ forceRefresh: false, showLoading: false });
-    };
-    const unsubSelfPresence = subscribeToCallPresence(myId, refreshFromRealtime);
-    const unsubFriendPresence = subscribeToCallPresence(friendId, refreshFromRealtime);
-
-    return () => {
-      unsubSelfPresence();
-      unsubFriendPresence();
-    };
-  }, [friendId, myId, refreshCallState]);
-
-  const composerBottomOffset = keyboardVisible ? 1 : tabBarMetrics.height + tabBarMetrics.bottom + 8;
-  const composerBottomPadding = keyboardVisible ? 3 : Math.max(10, insets.bottom + 4);
-  const listBottomPadding = composerBottomOffset + 86;
-  const checkingCallState = checkingCallReadiness || checkingCallAvailability;
-  const canStartCall =
-    !!friendId && !startingCall && !checkingCallState && callReady && callAvailable;
-  const callBlockedMessage = !callReady
-    ? callReadyMessage
-    : !callAvailable
-      ? callAvailabilityMessage
-      : null;
-
-  const sendMessage = async () => {
+  const sendText = useCallback(async () => {
     const body = input.trim();
-    if (!body || !threadId || sending || !myId) return;
+    if (!body || !threadId || !myId || sending) return;
     setSending(true);
     setSendError(null);
-    const optimistic: ChatMessage = {
-      id: `opt-${Date.now()}`,
-      thread_id: threadId,
-      sender_id: myId,
-      body,
-      message_type: 'text',
-      snap_id: null,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimistic]);
-    setInput('');
     try {
-      const inserted = await sendMessageApi(threadId, body);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === optimistic.id ? inserted : m)).sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        ),
-      );
-      setTimeout(() => (listRef.current as ScrollableListRef | null)?.scrollToEnd?.({ animated: true }), 100);
+      if (scheduleMinutes > 0) {
+        const scheduledFor = new Date(Date.now() + scheduleMinutes * 60000).toISOString();
+        await scheduleChatMessage(threadId, { body, scheduledFor });
+        queueScheduledDispatch(scheduledFor);
+        setInput('');
+        setScheduleMinutes(0);
+      } else {
+        await sendMessageApi(threadId, body);
+        setInput('');
+      }
     } catch (error) {
-      console.error('[chat] sendMessage error:', error);
       setSendError(supabaseErrorToUserMessage(error));
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-      setInput(body);
     } finally {
       setSending(false);
     }
-  };
+  }, [input, myId, queueScheduledDispatch, scheduleMinutes, sending, threadId]);
 
-  const handleStartCall = useCallback(async () => {
-    if (!friendId || !myId || startingCall || checkingCallState) return;
-    setStartingCall(true);
+  const pickAndSendPhoto = useCallback(async () => {
+    if (!threadId || !myId || uploadingMedia) return;
+    setUploadingMedia(true);
+    setSendError(null);
     try {
-      const callState = await refreshCallState({ forceRefresh: true, showLoading: true });
-      if (!callState.readiness) {
-        Alert.alert('Audio call unavailable', callState.readinessMessage ?? 'Audio calls are not configured yet.');
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== 'granted') {
+        setSendError('Media library permission is required to send photos.');
         return;
       }
-      if (!callState.availability) {
-        Alert.alert('Audio call unavailable', callState.availabilityMessage ?? 'This call cannot be started right now.');
-        return;
-      }
-      const session = await createOutgoingCallSession(friendId);
-      router.push(`/call/${session.id}`);
-    } catch (error) {
-      Alert.alert('Call failed', supabaseErrorToUserMessage(error));
-    } finally {
-      setStartingCall(false);
-    }
-  }, [checkingCallState, friendId, myId, refreshCallState, router, startingCall]);
-
-  const renderItem = useCallback(
-    ({ item }: { item: ChatMessage }): React.ReactElement => {
-      const isSent = item.sender_id === myId;
-      const isSnap = item.message_type === 'snap' && item.snap_id;
-      const isOpenedSnap = isSnap && item.snapOpened;
-      const snapLabel = isSent ? 'Snap sent' : 'Open snap';
-      return (
-        <View style={[styles.bubbleWrap, isSent ? styles.bubbleWrapSent : styles.bubbleWrapReceived]}>
-          {isSnap ? (
-            isOpenedSnap ? (
-              <View style={[styles.snapBubble, isSent ? styles.bubbleSent : styles.bubbleReceived]}>
-                <Ionicons name="eye-off-outline" size={20} color={isSent ? colors.textPrimary : colors.textMuted} />
-                <Text style={[styles.snapBubbleTextOpened, isSent && styles.bubbleTextSent]}>Opened</Text>
-                <Text style={[styles.bubbleTime, isSent ? styles.bubbleTimeSent : styles.bubbleTimeReceived]}>
-                  {formatTime(item.created_at)}
-                </Text>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.snapBubble, isSent ? styles.bubbleSent : styles.bubbleReceived]}
-                onPress={isSent ? undefined : () => router.push(`/snap/${item.snap_id}`)}
-                disabled={isSent}
-                activeOpacity={isSent ? 1 : 0.8}
-              >
-                <Ionicons name="camera" size={20} color={isSent ? colors.textMuted : colors.accentSecondary} />
-                <Text style={[styles.snapBubbleText, isSent && styles.snapBubbleTextDisabled]}>{snapLabel}</Text>
-                <Text style={[styles.bubbleTime, isSent ? styles.bubbleTimeSent : styles.bubbleTimeReceived]}>
-                  {formatTime(item.created_at)}
-                </Text>
-              </TouchableOpacity>
-            )
-          ) : (
-            <View style={[styles.bubble, isSent ? styles.bubbleSent : styles.bubbleReceived]}>
-              <Text style={[styles.bubbleText, isSent && styles.bubbleTextSent]}>{item.body}</Text>
-              <Text style={[styles.bubbleTime, isSent ? styles.bubbleTimeSent : styles.bubbleTimeReceived]}>
-                {formatTime(item.created_at)}
-              </Text>
-            </View>
-          )}
-        </View>
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.9,
+        allowsEditing: false,
+      });
+      if (picked.canceled) return;
+      const asset = picked.assets?.[0];
+      if (!asset?.uri) return;
+      const manipulated = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.86, format: ImageManipulator.SaveFormat.JPEG },
       );
-    },
-    [myId, router],
-  );
+      const upload = await uploadChatImageFromUri(myId, manipulated.uri ?? asset.uri);
+      await sendRichChatMessage(threadId, {
+        body: 'Photo',
+        messageType: 'image',
+        mediaPath: upload.path,
+        metadata: {
+          mimeType: upload.mimeType,
+          width: asset.width ?? null,
+          height: asset.height ?? null,
+        },
+      });
+    } catch (error) {
+      setSendError(supabaseErrorToUserMessage(error));
+    } finally {
+      setUploadingMedia(false);
+    }
+  }, [myId, threadId, uploadingMedia]);
 
-  if (threadError) {
+  const handleMessageAction = useCallback((msg: ChatMessage) => {
+    const isOwn = msg.sender_id === myId;
+    const canEdit = isOwn
+      && msg.message_type === 'text'
+      && !msg.deleted_at
+      && Date.now() - new Date(msg.created_at).getTime() <= 15 * 60 * 1000;
+    Alert.alert('Message', 'Choose action', [
+      ...REACTIONS.map((emoji) => ({ text: `${emoji} React`, onPress: () => toggleMessageReaction(msg.id, emoji).then(refreshReactions).catch(() => {}) })),
+      ...(canEdit ? [{ text: 'Edit', onPress: () => { setEditingId(msg.id); setEditingDraft(msg.body); } }, { text: 'Delete', style: 'destructive' as const, onPress: () => deleteOwnChatMessage(msg.id).then(() => loadThread()).catch(() => {}) }] : []),
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, [loadThread, myId, refreshReactions]);
+
+  const submitEdit = useCallback(async () => {
+    if (!editingId || !editingDraft.trim() || editingBusy) return;
+    setEditingBusy(true);
+    try {
+      await updateOwnChatMessage(editingId, editingDraft.trim());
+      setEditingId(null);
+      setEditingDraft('');
+      await loadThread();
+    } catch (error) {
+      setSendError(supabaseErrorToUserMessage(error));
+    } finally {
+      setEditingBusy(false);
+    }
+  }, [editingBusy, editingDraft, editingId, loadThread]);
+
+  const composerBottom = keyboardHeight > 0
+    ? keyboardHeight + 6
+    : tabBarMetrics.height + tabBarMetrics.bottom + 8;
+
+  const renderItem = ({ item }: { item: ChatMessage }) => {
+    const isSent = item.sender_id === myId;
+    const bubbleStyles = [styles.bubble, isSent ? styles.bubbleSent : styles.bubbleReceived];
+    const isSnap = item.message_type === 'snap' && item.snap_id;
+    const isImage = item.message_type === 'image' && !!item.media_path;
+    const snapOpened = !!item.snapOpened;
+    const snapVisual = getSnapVisualState(isSent, snapOpened);
+    const mediaUrl = mediaUrls[item.id];
+    const messageReactions = reactions[item.id] ?? [];
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.82}>
-            <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title} numberOfLines={1}>
-            Chat
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
-        <View style={styles.errorWrap}>
-          <Text style={styles.errorText}>{threadError}</Text>
-          <TouchableOpacity style={styles.errorBtn} onPress={handleBack} activeOpacity={0.82}>
-            <Text style={styles.errorBtnText}>Back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.82}>
-          <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
-        </TouchableOpacity>
-        {showProfileLink ? (
-          <TouchableOpacity
-            style={styles.headerProfile}
-            onPress={() => friendId && router.push(`/(tabs)/friends/detail/${friendId}`)}
-            activeOpacity={0.82}
-          >
-            <Avatar uri={friendAvatar} fallback={displayName} size="sm" />
-            <Text style={styles.title} numberOfLines={1}>
-              {displayName}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.headerProfile}>
-            <Avatar uri={friendAvatar} fallback={displayName} size="sm" />
-            <Text style={styles.title} numberOfLines={1}>
-              {displayName}
-            </Text>
-          </View>
-        )}
+      <View style={[styles.msgWrap, isSent ? styles.msgWrapSent : styles.msgWrapRecv]}>
         <TouchableOpacity
-          style={[styles.callBtn, !canStartCall && styles.callBtnDisabled]}
-          onPress={handleStartCall}
-          disabled={!canStartCall}
-          activeOpacity={0.82}
-        >
-          {startingCall || checkingCallState ? (
-            <ActivityIndicator size="small" color={colors.textPrimary} />
-          ) : (
-            <Ionicons name="call-outline" size={20} color={colors.textPrimary} />
-          )}
-        </TouchableOpacity>
-      </View>
-      {!checkingCallState && callBlockedMessage ? (
-        <TouchableOpacity
-          style={styles.callInfoBar}
-          activeOpacity={0.85}
+          style={bubbleStyles}
+          onLongPress={() => handleMessageAction(item)}
+          activeOpacity={0.9}
           onPress={() => {
-            refreshCallState({ forceRefresh: true, showLoading: true }).catch(() => {});
+            if (isSnap && !isSent && item.snap_id && !snapOpened) router.push(`/snap/${item.snap_id}`);
           }}
         >
-          <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.callInfoText} numberOfLines={2}>
-            {callBlockedMessage}
-          </Text>
-          <Ionicons name="refresh-outline" size={13} color={colors.textMuted} />
-        </TouchableOpacity>
-      ) : null}
-      {loading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="small" color={colors.accent} />
-        </View>
-      ) : (
-        <FlatList<ChatMessage>
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item: ChatMessage) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
-          style={styles.list}
-          initialNumToRender={16}
-          windowSize={8}
-          maxToRenderPerBatch={12}
-          removeClippedSubviews
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Ionicons name="chatbubble-ellipses-outline" size={40} color={colors.textMuted} />
-              <Text style={styles.emptyText}>No messages yet.</Text>
+          {isSnap ? (
+            <View style={[styles.snapCard, { backgroundColor: snapVisual.tintBackground }]}>
+              <View style={[styles.snapIconWrap, { borderColor: snapVisual.accentColor }]}>
+                <Ionicons name={snapVisual.icon} size={18} color={snapVisual.accentColor} />
+              </View>
+              <View style={styles.snapTextWrap}>
+                <Text style={[styles.snapTitle, { color: snapVisual.accentColor }]}>{snapVisual.title}</Text>
+                <Text style={styles.snapSubtitle}>{snapVisual.subtitle}</Text>
+              </View>
             </View>
-          }
-        />
-      )}
-      {sendError ? (
-        <View style={styles.sendErrorBox}>
-          <Text style={styles.sendErrorText}>{sendError}</Text>
-        </View>
-      ) : null}
-      <View style={[styles.inputRow, { marginBottom: composerBottomOffset, paddingBottom: composerBottomPadding }]}>
-        <TextInput
-          style={styles.input}
-          placeholder="Message..."
-          placeholderTextColor={colors.textMuted}
-          value={input}
-          onChangeText={setInput}
-          onFocus={() => setKeyboardVisible(true)}
-          onBlur={() => setKeyboardVisible(false)}
-          multiline
-          maxLength={2000}
-          editable={!sending && !!threadId}
-          onSubmitEditing={sendMessage}
-        />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!input.trim() || sending || !threadId) && styles.sendBtnDisabled]}
-          onPress={sendMessage}
-          disabled={!input.trim() || sending || !threadId}
-          activeOpacity={0.82}
-        >
-          {sending ? (
-            <ActivityIndicator size="small" color={colors.onAccent} />
+          ) : isImage ? (
+            <View style={styles.chatImageWrap}>
+              {mediaUrl ? (
+                <Image source={{ uri: mediaUrl }} style={styles.chatImage} resizeMode="cover" />
+              ) : (
+                <View style={styles.chatImageFallback}>
+                  <Ionicons name="image-outline" size={20} color={colors.textMuted} />
+                  <Text style={styles.chatImageFallbackText}>Loading photo...</Text>
+                </View>
+              )}
+            </View>
           ) : (
-            <Ionicons name="send" size={20} color={colors.onAccent} />
+            <Text style={[styles.msgText, item.deleted_at ? styles.deleted : null]}>{item.deleted_at ? '[deleted]' : item.body}</Text>
           )}
+          <Text style={styles.msgTime}>{formatTime(item.created_at)}</Text>
         </TouchableOpacity>
+        {messageReactions.length > 0 ? <View style={styles.reactRow}>{messageReactions.map((r) => <Text key={`${item.id}-${r.emoji}`} style={styles.reactBadge}>{`${r.emoji} ${r.count}`}</Text>)}</View> : null}
       </View>
-    </KeyboardAvoidingView>
+    );
+  };
+
+  if (threadError) return <View style={styles.center}><Text style={styles.err}>{threadError}</Text></View>;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleBack}><Ionicons name="arrow-back" size={22} color={colors.textPrimary} /></TouchableOpacity>
+        {showProfileLink ? <TouchableOpacity style={styles.headerProfile} onPress={() => friendId && router.push(`/(tabs)/friends/detail/${friendId}`)}><Avatar uri={friendAvatar} fallback={displayName} size="sm" /><Text style={styles.title}>{displayName}</Text></TouchableOpacity> : <View style={styles.headerProfile}><Avatar uri={friendAvatar} fallback={displayName} size="sm" /><Text style={styles.title}>{displayName}</Text></View>}
+      </View>
+      {loading ? <View style={styles.center}><ActivityIndicator color={colors.accent} /></View> : <FlatList ref={listRef} data={messages} renderItem={renderItem} keyExtractor={(item: ChatMessage) => item.id} contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: composerBottom + 92 }} />}
+      {sendError ? <View style={styles.errBox}><Text style={styles.errTxt}>{sendError}</Text></View> : null}
+      {editingId ? <View style={styles.editRow}><TextInput style={styles.input} value={editingDraft} onChangeText={setEditingDraft} /><TouchableOpacity style={styles.actionBtn} onPress={submitEdit} disabled={editingBusy}><Ionicons name="checkmark" size={18} color={colors.onAccent} /></TouchableOpacity><TouchableOpacity style={[styles.actionBtn, styles.grayBtn]} onPress={() => { setEditingId(null); setEditingDraft(''); }}><Ionicons name="close" size={18} color={colors.textPrimary} /></TouchableOpacity></View> : null}
+      <View style={[styles.inputRow, { marginBottom: composerBottom, paddingBottom: keyboardHeight > 0 ? 6 : Math.max(8, insets.bottom + 2) }]}>
+        <TouchableOpacity style={styles.actionBtn} disabled={uploadingMedia} onPress={pickAndSendPhoto}>{uploadingMedia ? <ActivityIndicator color={colors.onAccent} size="small" /> : <Ionicons name="image-outline" size={18} color={colors.onAccent} />}</TouchableOpacity>
+        <TextInput style={styles.input} placeholder="Message..." placeholderTextColor={colors.textMuted} value={input} onChangeText={setInput} multiline />
+        <TouchableOpacity style={[styles.scheduleBtn, scheduleMinutes > 0 && styles.scheduleBtnOn]} onPress={onCycleSchedule}><Text style={styles.scheduleTxt}>{scheduleLabel(scheduleMinutes)}</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.actionBtn, !input.trim() && styles.disabled]} onPress={sendText} disabled={!input.trim() || sending}>{sending ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Ionicons name="send" size={18} color={colors.onAccent} />}</TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    backgroundColor: colors.bgCard,
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  err: { color: colors.error, fontSize: 14 },
+  errBox: { marginHorizontal: spacing.lg, marginBottom: 8, padding: 10, borderRadius: radius.sm, backgroundColor: 'rgba(251,113,133,0.12)' },
+  errTxt: { color: colors.error, fontSize: 13 },
+  header: { flexDirection: 'row', alignItems: 'center', marginHorizontal: spacing.lg, marginTop: spacing.sm, marginBottom: spacing.md, padding: 10, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.bgCardBorder, backgroundColor: colors.bgCard, gap: 8 },
+  backBtn: { width: 42, height: 42, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgCardAlt },
+  headerProfile: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  title: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, flex: 1 },
+  msgWrap: { marginBottom: 8, maxWidth: '85%' },
+  msgWrapSent: { alignSelf: 'flex-end' },
+  msgWrapRecv: { alignSelf: 'flex-start' },
+  bubble: { borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12 },
+  bubbleSent: {
+    backgroundColor: 'rgba(125,211,252,0.18)',
+    borderBottomRightRadius: 4,
     borderWidth: 1,
-    borderColor: colors.bgCardBorder,
-    borderRadius: radius.lg,
-    gap: 8,
+    borderColor: 'rgba(125,211,252,0.34)',
   },
-  backBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bgCardAlt,
-  },
-  callBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bgCardAlt,
-    borderWidth: 1,
-    borderColor: colors.bgCardBorder,
-  },
-  callBtnDisabled: {
-    opacity: 0.55,
-  },
-  headerProfile: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, minWidth: 0 },
-  headerSpacer: { width: 40 },
-  title: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.textPrimary },
-  list: { flex: 1 },
-  listContent: { paddingHorizontal: spacing.lg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  callInfoBar: {
-    marginHorizontal: spacing.lg,
-    marginTop: -4,
-    marginBottom: spacing.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.bgCardBorder,
-    backgroundColor: 'rgba(15,23,42,0.45)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  callInfoText: {
-    flex: 1,
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  emptyWrap: { paddingVertical: 48, alignItems: 'center', gap: 8 },
-  emptyText: { fontSize: 14, color: colors.textMuted },
-  errorWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  errorText: { fontSize: 15, color: colors.error, textAlign: 'center', marginBottom: 16 },
-  errorBtn: { paddingVertical: 12, paddingHorizontal: 22, backgroundColor: colors.accent, borderRadius: radius.md },
-  errorBtnText: { fontSize: 16, fontWeight: '700', color: colors.onAccent },
-  bubbleWrap: { marginBottom: 8, maxWidth: '85%' },
-  bubbleWrapSent: { alignSelf: 'flex-end', alignItems: 'flex-end' },
-  bubbleWrapReceived: { alignSelf: 'flex-start', alignItems: 'flex-start' },
-  bubble: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 20, maxWidth: '100%' },
-  bubbleSent: { backgroundColor: colors.bubbleSent, borderBottomRightRadius: 4 },
   bubbleReceived: {
-    backgroundColor: colors.bubbleReceived,
+    backgroundColor: 'rgba(148,163,184,0.20)',
     borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: colors.bgCardBorder,
+    borderColor: 'rgba(148,163,184,0.28)',
   },
-  bubbleText: { fontSize: 15, color: colors.textPrimary },
-  bubbleTextSent: { color: colors.textPrimary },
-  snapBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    maxWidth: '100%',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  snapBubbleText: { fontSize: 14, fontWeight: '700', color: colors.accentSecondary },
-  snapBubbleTextDisabled: { color: colors.textMuted },
-  snapBubbleTextOpened: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
-  bubbleTime: { fontSize: 11, marginTop: 4 },
-  bubbleTimeSent: { color: 'rgba(248,250,252,0.78)' },
-  bubbleTimeReceived: { color: colors.textMuted },
-  sendErrorBox: {
-    marginHorizontal: 12,
-    marginVertical: 8,
-    padding: 12,
-    backgroundColor: 'rgba(251,113,133,0.12)',
-    borderRadius: radius.sm,
-  },
-  sendErrorText: { fontSize: 14, color: colors.error },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginHorizontal: spacing.lg,
-    padding: 10,
-    backgroundColor: colors.bgCard,
+  msgText: { color: colors.textPrimary, fontSize: 15 },
+  chatImageWrap: {
+    width: 190,
+    height: 220,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,17,30,0.72)',
     borderWidth: 1,
     borderColor: colors.bgCardBorder,
-    borderRadius: radius.lg,
-    gap: 8,
   },
-  input: {
+  chatImage: {
+    width: '100%',
+    height: '100%',
+  },
+  chatImageFallback: {
     flex: 1,
-    minHeight: 40,
-    maxHeight: 100,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    backgroundColor: colors.inputBg,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: colors.textPrimary,
-  },
-  sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
   },
-  sendBtnDisabled: { opacity: 0.4 },
+  chatImageFallbackText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  snapCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  snapIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  snapTextWrap: {
+    flexShrink: 1,
+  },
+  snapTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  snapSubtitle: {
+    marginTop: 1,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  msgTime: { marginTop: 3, fontSize: 11, color: colors.textMuted, alignSelf: 'flex-end' },
+  deleted: { fontStyle: 'italic', color: colors.textMuted },
+  reactRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  reactBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.bgCardBorder, backgroundColor: colors.bgCardAlt, color: colors.textSecondary, fontSize: 11 },
+  editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: spacing.lg, marginBottom: 8, padding: 8, borderRadius: radius.md, borderWidth: 1, borderColor: colors.bgCardBorder, backgroundColor: colors.bgCard },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', marginHorizontal: spacing.lg, gap: 8, padding: 10, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.bgCardBorder, backgroundColor: colors.bgCard },
+  input: { flex: 1, minHeight: 40, maxHeight: 100, borderRadius: 18, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.inputBg, color: colors.textPrimary, paddingHorizontal: 14, paddingVertical: 8, fontSize: 15 },
+  actionBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
+  grayBtn: { backgroundColor: colors.bgCardAlt, borderWidth: 1, borderColor: colors.bgCardBorder },
+  disabled: { opacity: 0.45 },
+  scheduleBtn: { height: 38, minWidth: 56, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.bgCardBorder, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, backgroundColor: colors.bgCardAlt },
+  scheduleBtnOn: { borderColor: colors.accent, backgroundColor: 'rgba(255,138,91,0.16)' },
+  scheduleTxt: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
 });

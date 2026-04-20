@@ -17,6 +17,7 @@ export default function FriendsLayout() {
       <Stack.Screen name="discover" />
       <Stack.Screen name="search" />
       <Stack.Screen name="requests" />
+      <Stack.Screen name="groups/create" />
       <Stack.Screen name="chat/[userId]" />
       <Stack.Screen name="detail/[friendId]" />
     </Stack>

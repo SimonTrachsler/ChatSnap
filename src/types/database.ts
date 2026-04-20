@@ -82,6 +82,7 @@ export interface Database {
           sender_id: string;
           recipient_id: string;
           media_url: string | null;
+          is_sensitive: boolean;
           opened: boolean;
           created_at: string;
         };
@@ -90,6 +91,7 @@ export interface Database {
           sender_id: string;
           recipient_id: string;
           media_url?: string | null;
+          is_sensitive?: boolean;
           opened?: boolean;
           created_at?: string;
         };
@@ -98,6 +100,7 @@ export interface Database {
           sender_id?: string;
           recipient_id?: string;
           media_url?: string | null;
+          is_sensitive?: boolean;
           opened?: boolean;
           created_at?: string;
         };
@@ -158,6 +161,11 @@ export interface Database {
           body: string;
           message_type: string;
           snap_id: string | null;
+          media_path: string | null;
+          metadata: Json;
+          edited_at: string | null;
+          deleted_at: string | null;
+          scheduled_for: string | null;
           read_at: string | null;
           created_at: string;
         };
@@ -168,6 +176,11 @@ export interface Database {
           body: string;
           message_type?: string;
           snap_id?: string | null;
+          media_path?: string | null;
+          metadata?: Json;
+          edited_at?: string | null;
+          deleted_at?: string | null;
+          scheduled_for?: string | null;
           read_at?: string | null;
           created_at?: string;
         };
@@ -178,66 +191,273 @@ export interface Database {
           body?: string;
           message_type?: string;
           snap_id?: string | null;
+          media_path?: string | null;
+          metadata?: Json;
+          edited_at?: string | null;
+          deleted_at?: string | null;
+          scheduled_for?: string | null;
           read_at?: string | null;
           created_at?: string;
         };
       };
-      call_sessions: {
+      chat_message_reactions: {
+        Row: {
+          id: string;
+          message_id: string;
+          user_id: string;
+          emoji: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id: string;
+          user_id: string;
+          emoji: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          message_id?: string;
+          user_id?: string;
+          emoji?: string;
+          created_at?: string;
+        };
+      };
+      scheduled_chat_messages: {
         Row: {
           id: string;
           thread_id: string;
-          caller_id: string;
-          callee_id: string;
-          provider: string;
-          rtc_channel: string;
-          status: string;
+          sender_id: string;
+          body: string;
+          message_type: string;
+          snap_id: string | null;
+          media_path: string | null;
+          metadata: Json;
+          scheduled_for: string;
+          sent_at: string | null;
           created_at: string;
-          accepted_at: string | null;
-          started_at: string | null;
-          ended_at: string | null;
         };
         Insert: {
           id?: string;
           thread_id: string;
-          caller_id: string;
-          callee_id: string;
-          provider?: string;
-          rtc_channel: string;
-          status?: string;
+          sender_id: string;
+          body: string;
+          message_type?: string;
+          snap_id?: string | null;
+          media_path?: string | null;
+          metadata?: Json;
+          scheduled_for: string;
+          sent_at?: string | null;
           created_at?: string;
-          accepted_at?: string | null;
-          started_at?: string | null;
-          ended_at?: string | null;
         };
         Update: {
           id?: string;
           thread_id?: string;
-          caller_id?: string;
-          callee_id?: string;
-          provider?: string;
-          rtc_channel?: string;
-          status?: string;
+          sender_id?: string;
+          body?: string;
+          message_type?: string;
+          snap_id?: string | null;
+          media_path?: string | null;
+          metadata?: Json;
+          scheduled_for?: string;
+          sent_at?: string | null;
           created_at?: string;
-          accepted_at?: string | null;
-          started_at?: string | null;
-          ended_at?: string | null;
         };
       };
-      call_presence: {
+      stories: {
         Row: {
+          id: string;
           user_id: string;
-          is_in_call: boolean;
-          updated_at: string;
+          media_path: string;
+          media_kind: string;
+          caption: string | null;
+          is_sensitive: boolean;
+          created_at: string;
+          expires_at: string;
         };
         Insert: {
+          id?: string;
           user_id: string;
-          is_in_call?: boolean;
-          updated_at?: string;
+          media_path: string;
+          media_kind?: string;
+          caption?: string | null;
+          is_sensitive?: boolean;
+          created_at?: string;
+          expires_at?: string;
         };
         Update: {
+          id?: string;
           user_id?: string;
-          is_in_call?: boolean;
-          updated_at?: string;
+          media_path?: string;
+          media_kind?: string;
+          caption?: string | null;
+          is_sensitive?: boolean;
+          created_at?: string;
+          expires_at?: string;
+        };
+      };
+      story_views: {
+        Row: {
+          id: string;
+          story_id: string;
+          viewer_id: string;
+          viewed_at: string;
+        };
+        Insert: {
+          id?: string;
+          story_id: string;
+          viewer_id: string;
+          viewed_at?: string;
+        };
+        Update: {
+          id?: string;
+          story_id?: string;
+          viewer_id?: string;
+          viewed_at?: string;
+        };
+      };
+      best_friends: {
+        Row: {
+          id: string;
+          owner_id: string;
+          friend_id: string;
+          rank: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          friend_id: string;
+          rank?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          friend_id?: string;
+          rank?: number;
+          created_at?: string;
+        };
+      };
+      group_threads: {
+        Row: {
+          id: string;
+          owner_id: string;
+          title: string;
+          avatar_url: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          title: string;
+          avatar_url?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          title?: string;
+          avatar_url?: string | null;
+          created_at?: string;
+        };
+      };
+      group_thread_members: {
+        Row: {
+          id: string;
+          thread_id: string;
+          user_id: string;
+          role: string;
+          joined_at: string;
+        };
+        Insert: {
+          id?: string;
+          thread_id: string;
+          user_id: string;
+          role?: string;
+          joined_at?: string;
+        };
+        Update: {
+          id?: string;
+          thread_id?: string;
+          user_id?: string;
+          role?: string;
+          joined_at?: string;
+        };
+      };
+      group_messages: {
+        Row: {
+          id: string;
+          thread_id: string;
+          sender_id: string;
+          body: string;
+          message_type: string;
+          media_path: string | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          thread_id: string;
+          sender_id: string;
+          body: string;
+          message_type?: string;
+          media_path?: string | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          thread_id?: string;
+          sender_id?: string;
+          body?: string;
+          message_type?: string;
+          media_path?: string | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+      };
+      user_photo_favorites: {
+        Row: {
+          id: string;
+          user_id: string;
+          photo_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          photo_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          photo_id?: string;
+          created_at?: string;
+        };
+      };
+      snap_screenshot_events: {
+        Row: {
+          id: string;
+          snap_id: string;
+          user_id: string;
+          platform: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          snap_id: string;
+          user_id: string;
+          platform?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          snap_id?: string;
+          user_id?: string;
+          platform?: string | null;
+          created_at?: string;
         };
       };
       friend_aliases: {
@@ -268,9 +488,65 @@ export interface Database {
         Args: { other_user_id: string };
         Returns: string;
       };
-      get_call_availability: {
-        Args: { p_target_user_id: string };
-        Returns: { available: boolean; reason: string }[];
+      toggle_chat_message_reaction: {
+        Args: { p_message_id: string; p_emoji: string };
+        Returns: boolean;
+      };
+      dispatch_due_scheduled_messages: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      mark_story_viewed: {
+        Args: { p_story_id: string };
+        Returns: void;
+      };
+      create_group_thread: {
+        Args: { p_title: string; p_member_ids: string[] };
+        Returns: string;
+      };
+      create_group_thread_v2: {
+        Args: { p_title: string; p_member_ids: string[]; p_avatar_url?: string | null };
+        Returns: string;
+      };
+      list_threads_with_preview: {
+        Args: { p_limit?: number | null };
+        Returns: {
+          thread_id: string;
+          other_user_id: string;
+          other_username: string | null;
+          other_avatar_url: string | null;
+          preview_text: string;
+          last_at: string;
+          last_type: string;
+          last_snap_opened: boolean | null;
+          has_unread: boolean;
+        }[];
+      };
+      list_group_threads_with_preview: {
+        Args: { p_limit?: number | null };
+        Returns: {
+          id: string;
+          title: string;
+          owner_id: string;
+          avatar_url: string | null;
+          created_at: string;
+          member_count: number;
+          last_message_body: string | null;
+          last_message_at: string | null;
+          last_sender_id: string | null;
+        }[];
+      };
+      add_group_thread_member: {
+        Args: { p_thread_id: string; p_user_id: string };
+        Returns: void;
+      };
+      remove_group_thread_member: {
+        Args: { p_thread_id: string; p_user_id: string };
+        Returns: void;
+      };
+      get_friendship_streaks: {
+        Args: { p_limit?: number | null };
+        Returns: { friend_id: string; streak_days: number; points: number; last_interaction: string | null }[];
       };
       mark_thread_read: {
         Args: { p_thread_id: string };

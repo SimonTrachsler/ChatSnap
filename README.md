@@ -20,6 +20,7 @@ npm install
 
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_TELEMETRY_ENABLED` (optional, default `true`)
 
 App starten:
 
@@ -36,9 +37,11 @@ npm run start:lan
 ## Scripts
 
 - `npm run lint`
+- `npm run typecheck`
+- `npm run doctor`
+- `npm run verify:quality`
 - `npm run start:lan`
 - `npm run start:lan:clear`
-- `npm run verify:calls`
 - `npx tsc --noEmit`
 - `npx expo-doctor`
 - `npm run prepare-assets`

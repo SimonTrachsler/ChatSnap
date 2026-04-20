@@ -5,6 +5,7 @@ declare module 'react' {
   export const useState: <S>(initial: S | (() => S)) => [S, (s: S | ((p: S) => S)) => void];
   export const useEffect: (effect: () => void | (() => void), deps?: unknown[]) => void;
   export const useCallback: <T extends (...args: any[]) => any>(f: T, deps: readonly unknown[]) => T;
+  export const useMemo: <T>(factory: () => T, deps: readonly unknown[]) => T;
   export const memo: <T>(component: T) => T;
   export const startTransition: (scope: () => void) => void;
   export function useRef<T>(initial: T): { current: T };

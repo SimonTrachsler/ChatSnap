@@ -13,22 +13,6 @@ export type SupabaseLikeError = {
   statusCode?: number;
 };
 
-/**
- * For dev only: returns a string with code, message, details, hint for debugging.
- * Use when __DEV__ to surface the exact Supabase error in the UI or logs.
- */
-export function getSupabaseErrorDebugString(error: unknown): string {
-  if (error == null) return 'null';
-  const e = error as SupabaseLikeError;
-  const parts = [
-    e?.code != null ? `code: ${e.code}` : '',
-    e?.message != null ? `message: ${e.message}` : '',
-    e?.details != null ? `details: ${e.details}` : '',
-    e?.hint != null ? `hint: ${e.hint}` : '',
-  ].filter(Boolean);
-  return parts.length ? parts.join(' | ') : String(error);
-}
-
 const MSG = {
   auth: 'Bitte erneut anmelden.',
   forbidden: 'Keine Berechtigung für diese Aktion.',
@@ -38,6 +22,10 @@ const MSG = {
   friendRequestPermission: "You don't have permission to send this request.",
   friendRequestUserNotFound: 'User not found or invalid.',
   chatFriendsOnly: 'Chat is only available for friends.',
+  groupNotAdmin: 'Only group admins can do this.',
+  groupMemberMustBeFriend: 'You can only add friends to a group.',
+  groupOwnerCannotBeRemoved: 'The group owner cannot be removed.',
+  groupOwnerCannotLeave: 'The group owner cannot leave the group.',
   rateLimit: 'Zu viele Anfragen. Bitte kurz warten.',
   generic: 'Etwas ist schiefgelaufen. Bitte später erneut versuchen.',
 } as const;
@@ -79,6 +67,12 @@ export function supabaseErrorToUserMessage(
   // Message hints (avoid leaking internals; only use for known patterns)
   const lower = msg.toLowerCase();
   if (code === 'P0001' && lower.includes('only friends can open a chat')) return MSG.chatFriendsOnly;
+  if (code === 'P0001' && lower.includes('group_not_admin')) return MSG.groupNotAdmin;
+  if (code === 'P0001' && lower.includes('group_member_must_be_friend')) return MSG.groupMemberMustBeFriend;
+  if (code === 'P0001' && lower.includes('group_owner_cannot_be_removed')) return MSG.groupOwnerCannotBeRemoved;
+  if (code === 'P0001' && lower.includes('group_owner_cannot_leave')) return MSG.groupOwnerCannotLeave;
+  if (code === 'P0001' && lower.includes('rate_limit_chat_messages')) return MSG.rateLimit;
+  if (code === 'P0001' && lower.includes('rate_limit_snaps')) return MSG.rateLimit;
   if (lower.includes('jwt') && (lower.includes('expired') || lower.includes('invalid')))
     return MSG.auth;
   if (lower.includes('rate limit') || lower.includes('too many')) return MSG.rateLimit;
@@ -86,3 +80,4 @@ export function supabaseErrorToUserMessage(
 
   return MSG.generic;
 }
+

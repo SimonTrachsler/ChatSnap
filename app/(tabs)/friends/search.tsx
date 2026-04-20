@@ -16,12 +16,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { searchProfiles, type ProfileSearchResult } from '@/lib/profileSearch';
 import { useAuthStore } from '@/store/useAuthStore';
 import { supabaseErrorToUserMessage } from '@/lib/supabaseErrors';
-import { getRelationshipState, sendFriendRequest, acceptFriendRequestByRequesterId, type RelationshipState } from '@/lib/friendRequests';
+import {
+  getRelationshipState,
+  getRelationshipStates,
+  sendFriendRequest,
+  acceptFriendRequestByRequesterId,
+  type RelationshipState,
+} from '@/lib/friendRequests';
 import { useFriendRequestsStore } from '@/store/useFriendRequestsStore';
 import { Avatar } from '@/ui/components/Avatar';
 import { colors, radius, spacing } from '@/ui/theme';
 
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 220;
 
 export default function UserSearchScreen() {
   const router = useRouter();
@@ -38,6 +44,7 @@ export default function UserSearchScreen() {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const refreshPendingIncoming = useFriendRequestsStore((s) => s.refreshPendingIncoming);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
 
   const handleBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -48,6 +55,10 @@ export default function UserSearchScreen() {
   }, [navigation, router]);
 
   const runSearch = useCallback(async () => {
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+    const isStale = () => searchRequestRef.current !== requestId;
+
     if (!userId) { setError('Not signed in.'); setResults([]); return; }
     const q = query.trim();
     if (!q) { setResults([]); setError(null); setShowGoToRequestsLink(false); return; }
@@ -55,31 +66,42 @@ export default function UserSearchScreen() {
     setShowGoToRequestsLink(false);
     setLoading(true);
     try {
-      const list = await searchProfiles(q);
+      const list = await searchProfiles(q, { currentUserId: userId });
+      if (isStale()) return;
       setResults(list);
-      if (list.length && userId) {
-        const entries = await Promise.all(
-          list.map(async (r) => [r.id, await getRelationshipState(userId, r.id)] as const)
-        );
-        setRelationshipByUserId(Object.fromEntries(entries));
+      if (list.length) {
+        const states = await getRelationshipStates(userId, list.map((r) => r.id));
+        if (isStale()) return;
+        setRelationshipByUserId(states);
       } else {
         setRelationshipByUserId({});
       }
     } catch (e) {
+      if (isStale()) return;
       setError(supabaseErrorToUserMessage(e));
       setResults([]);
       setRelationshipByUserId({});
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [query, userId]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = query.trim();
-    if (!trimmed) { setResults([]); setError(null); setShowGoToRequestsLink(false); return; }
+    if (!trimmed) {
+      searchRequestRef.current += 1;
+      setResults([]);
+      setError(null);
+      setShowGoToRequestsLink(false);
+      setLoading(false);
+      return;
+    }
     debounceRef.current = setTimeout(() => { debounceRef.current = null; runSearch(); }, DEBOUNCE_MS);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      searchRequestRef.current += 1;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [query, runSearch]);
 
   const handleAdd = useCallback(
@@ -160,8 +182,8 @@ export default function UserSearchScreen() {
 
   const getAddButtonState = (item: ProfileSearchResult) => {
     const state = relationshipByUserId[item.id];
-    if (addingId === item.id) return { disabled: true, label: 'Sending…', loading: true, showGoToRequests: false, isAccept: false };
-    if (acceptingId === item.id) return { disabled: true, label: 'Accepting…', loading: true, showGoToRequests: false, isAccept: true };
+    if (addingId === item.id) return { disabled: true, label: 'Sending...', loading: true, showGoToRequests: false, isAccept: false };
+    if (acceptingId === item.id) return { disabled: true, label: 'Accepting...', loading: true, showGoToRequests: false, isAccept: true };
     if (addingId !== null || acceptingId !== null) return { disabled: true, label: 'Add', loading: false, showGoToRequests: false, isAccept: false };
     if (state === 'already_friends' || alreadyRequestedIds.has(item.id)) return { disabled: true, label: 'Friends', showGoToRequests: false, isAccept: false };
     if (state === 'outgoing_pending') return { disabled: true, label: 'Waiting for acceptance', showGoToRequests: false, isAccept: false };
@@ -219,7 +241,7 @@ export default function UserSearchScreen() {
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.hint}>Searching…</Text>
+          <Text style={styles.hint}>Searching...</Text>
         </View>
       ) : showEmpty ? (
         <View style={styles.centered}>

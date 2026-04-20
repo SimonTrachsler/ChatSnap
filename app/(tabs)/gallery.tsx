@@ -24,6 +24,7 @@ import { EmptyState } from '@/ui/components/EmptyState';
 import { PageHeader } from '@/ui/components/PageHeader';
 import { colors, radius } from '@/ui/theme';
 import { getUserPhotoStoragePath } from '@/lib/userPhotos';
+import { listFavoritePhotoIds, togglePhotoFavorite } from '@/lib/socialFeatures';
 
 type UserPhoto = {
   id: string;
@@ -33,8 +34,34 @@ type UserPhoto = {
 
 const USER_PHOTOS_BUCKET = 'user-photos';
 const SIGNED_URL_EXPIRY = 3600;
+const SIGNED_URL_SAFE_TTL_MS = SIGNED_URL_EXPIRY * 1000 - 45_000;
+const FOCUS_REFRESH_COOLDOWN_MS = 2500;
 const GAP = 8;
 const PADDING = 24;
+
+type SignedUrlCacheEntry = {
+  url: string;
+  expiresAt: number;
+};
+
+const signedUrlCache = new Map<string, SignedUrlCacheEntry>();
+
+function readSignedUrlCache(storagePath: string): string | null {
+  const cached = signedUrlCache.get(storagePath);
+  if (!cached) return null;
+  if (Date.now() >= cached.expiresAt) {
+    signedUrlCache.delete(storagePath);
+    return null;
+  }
+  return cached.url;
+}
+
+function writeSignedUrlCache(storagePath: string, signedUrl: string): void {
+  signedUrlCache.set(storagePath, {
+    url: signedUrl,
+    expiresAt: Date.now() + Math.max(60_000, SIGNED_URL_SAFE_TTL_MS),
+  });
+}
 
 export default function GalleryScreen() {
   const router = useRouter();
@@ -44,6 +71,8 @@ export default function GalleryScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const itemSize = (screenWidth - PADDING * 2 - GAP * 2) / 3;
   const hasLoadedOnceRef = useRef(false);
+  const lastLoadedAtRef = useRef(0);
+  const requestRef = useRef(0);
 
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -53,9 +82,76 @@ export default function GalleryScreen() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const selectedPhotoUri = selectedPhoto ? (urls[selectedPhoto.id] ?? null) : null;
+  const selectedIsFavorite = selectedPhoto ? favoriteIds.has(selectedPhoto.id) : false;
 
-  const loadGallery = useCallback(async () => {
+  const resolveSignedUrls = useCallback(async (list: UserPhoto[]): Promise<Record<string, string>> => {
+    const byPhotoId: Record<string, string> = {};
+    const pathByPhotoId = new Map<string, string>();
+    const missingPaths = new Set<string>();
+
+    for (const photo of list) {
+      const storagePath = getUserPhotoStoragePath(photo);
+      if (!storagePath) continue;
+      const cached = readSignedUrlCache(storagePath);
+      if (cached) {
+        byPhotoId[photo.id] = cached;
+        continue;
+      }
+      pathByPhotoId.set(photo.id, storagePath);
+      missingPaths.add(storagePath);
+    }
+
+    const missingPathList = Array.from(missingPaths);
+    const signedByPath = new Map<string, string>();
+    const storage = supabase.storage.from(USER_PHOTOS_BUCKET) as unknown as {
+      createSignedUrls?: (
+        paths: string[],
+        expiresIn: number,
+      ) => Promise<{
+        data?: Array<{ path?: string | null; signedUrl?: string | null }>;
+        error?: { message?: string } | null;
+      }>;
+      createSignedUrl: (
+        path: string,
+        expiresIn: number,
+      ) => Promise<{ data?: { signedUrl?: string | null } | null }>;
+    };
+
+    if (missingPathList.length && typeof storage.createSignedUrls === 'function') {
+      const batch = await storage.createSignedUrls(missingPathList, SIGNED_URL_EXPIRY);
+      for (const row of batch.data ?? []) {
+        if (typeof row?.path !== 'string' || typeof row?.signedUrl !== 'string') continue;
+        signedByPath.set(row.path, row.signedUrl);
+        writeSignedUrlCache(row.path, row.signedUrl);
+      }
+    }
+
+    const unresolvedPaths = missingPathList.filter((path) => !signedByPath.has(path));
+    if (unresolvedPaths.length) {
+      const fallbackResults = await Promise.all(
+        unresolvedPaths.map(async (path) => {
+          const { data } = await storage.createSignedUrl(path, SIGNED_URL_EXPIRY);
+          return data?.signedUrl ? ([path, data.signedUrl] as const) : null;
+        }),
+      );
+      for (const pair of fallbackResults) {
+        if (!pair) continue;
+        signedByPath.set(pair[0], pair[1]);
+        writeSignedUrlCache(pair[0], pair[1]);
+      }
+    }
+
+    for (const [photoId, path] of pathByPhotoId.entries()) {
+      const signedUrl = signedByPath.get(path);
+      if (signedUrl) byPhotoId[photoId] = signedUrl;
+    }
+
+    return byPhotoId;
+  }, []);
+
+  const loadGallery = useCallback(async (options?: { force?: boolean }) => {
     if (!userId) {
       startTransition(() => {
         setPhotos([]);
@@ -65,45 +161,69 @@ export default function GalleryScreen() {
       setRefreshing(false);
       return;
     }
+
+    const force = options?.force === true;
+    if (!force && hasLoadedOnceRef.current && Date.now() - lastLoadedAtRef.current < FOCUS_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+
+    const req = requestRef.current + 1;
+    requestRef.current = req;
+    const isStale = () => requestRef.current !== req;
+
     const firstLoad = !hasLoadedOnceRef.current;
     if (firstLoad) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const { data, error: fetchError } = await supabase
-        .from('user_photos')
-        .select('id, created_at, storage_path')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      if (fetchError) {
-        setError(fetchError.message);
+      const [photosResult, favoriteList] = await Promise.all([
+        supabase
+          .from('user_photos')
+          .select('id, created_at, storage_path')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false }),
+        listFavoritePhotoIds().catch(() => [] as string[]),
+      ]);
+
+      if (isStale()) return;
+      if (photosResult.error) {
+        setError(photosResult.error.message);
         return;
       }
-      const list = (data ?? []) as UserPhoto[];
-      const urlEntries = await Promise.all(
-        list.map(async (photo) => {
-          const storagePath = getUserPhotoStoragePath(photo);
-          if (!storagePath) return null;
-          const { data: signedData } = await supabase.storage
-            .from(USER_PHOTOS_BUCKET)
-            .createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
-          return signedData?.signedUrl ? ([photo.id, signedData.signedUrl] as const) : null;
-        }),
-      );
-      const displayUrls = Object.fromEntries(urlEntries.filter((entry): entry is readonly [string, string] => entry != null));
+
+      const list = (photosResult.data ?? []) as UserPhoto[];
       startTransition(() => {
         setPhotos(list);
-        setUrls(displayUrls);
+        setUrls((prev) => {
+          const next: Record<string, string> = {};
+          for (const photo of list) {
+            if (prev[photo.id]) next[photo.id] = prev[photo.id];
+          }
+          return next;
+        });
+        setFavoriteIds(new Set(favoriteList));
       });
+
+      const resolvedUrls = await resolveSignedUrls(list);
+      if (isStale()) return;
+      startTransition(() => {
+        setUrls((prev) => ({ ...prev, ...resolvedUrls }));
+      });
+
       hasLoadedOnceRef.current = true;
+      lastLoadedAtRef.current = Date.now();
+    } catch (e) {
+      if (!isStale()) setError(e instanceof Error ? e.message : 'Failed to load gallery.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!isStale()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [userId]);
+  }, [resolveSignedUrls, userId]);
 
   useFocusEffect(useCallback(() => { loadGallery(); }, [loadGallery]));
-  useEffect(() => { if (refresh && userId) loadGallery(); }, [refresh, userId, loadGallery]);
+  useEffect(() => { if (refresh && userId) loadGallery({ force: true }); }, [refresh, userId, loadGallery]);
 
   useEffect(() => {
     if (!userId) return;
@@ -115,11 +235,17 @@ export default function GalleryScreen() {
           const storagePath = getUserPhotoStoragePath(row);
           let signedUrl: string | null = null;
           if (storagePath) {
-            const { data: signedData } = await supabase.storage.from(USER_PHOTOS_BUCKET).createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
-            signedUrl = signedData?.signedUrl ?? null;
+            const cached = readSignedUrlCache(storagePath);
+            if (cached) {
+              signedUrl = cached;
+            } else {
+              const { data: signedData } = await supabase.storage.from(USER_PHOTOS_BUCKET).createSignedUrl(storagePath, SIGNED_URL_EXPIRY);
+              signedUrl = signedData?.signedUrl ?? null;
+              if (signedUrl) writeSignedUrlCache(storagePath, signedUrl);
+            }
           }
           startTransition(() => {
-            setPhotos((prev) => [row, ...prev]);
+            setPhotos((prev) => (prev.some((p) => p.id === row.id) ? prev : [row, ...prev]));
             if (signedUrl) setUrls((prev) => ({ ...prev, [row.id]: signedUrl! }));
           });
         })
@@ -131,6 +257,11 @@ export default function GalleryScreen() {
             setUrls((prev) => {
               const next = { ...prev };
               delete next[row.id];
+              return next;
+            });
+            setFavoriteIds((prev) => {
+              const next = new Set(prev);
+              next.delete(row.id);
               return next;
             });
           });
@@ -149,6 +280,21 @@ export default function GalleryScreen() {
     closePreview();
     router.push('/(tabs)/snap-send');
   }, [selectedPhoto, urls, setPendingGalleryUri, closePreview, router]);
+
+  const handleToggleFavorite = useCallback(async () => {
+    if (!selectedPhoto) return;
+    try {
+      const enabled = await togglePhotoFavorite(selectedPhoto.id);
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (enabled) next.add(selectedPhoto.id);
+        else next.delete(selectedPhoto.id);
+        return next;
+      });
+    } catch (e) {
+      setModalError(e instanceof Error ? e.message : 'Could not update favorite.');
+    }
+  }, [selectedPhoto]);
 
   const handleDeletePhoto = useCallback(async () => {
     if (!selectedPhoto) return;
@@ -202,7 +348,7 @@ export default function GalleryScreen() {
         windowSize={7}
         maxToRenderPerBatch={12}
         removeClippedSubviews
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadGallery} tintColor={colors.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadGallery({ force: true })} tintColor={colors.accent} />}
         ListHeaderComponent={
           <View>
             <PageHeader title="Gallery" />
@@ -231,6 +377,11 @@ export default function GalleryScreen() {
                   <Ionicons name="image-outline" size={24} color={colors.textMuted} />
                 </View>
               )}
+              {favoriteIds.has(item.id) ? (
+                <View style={styles.favoriteBadge}>
+                  <Ionicons name="heart" size={14} color={colors.accent} />
+                </View>
+              ) : null}
             </TouchableOpacity>
           );
         }}
@@ -256,6 +407,21 @@ export default function GalleryScreen() {
               )}
               <View style={styles.modalActions} pointerEvents="box-none">
                 <View style={styles.modalButtonsRow}>
+                  <TouchableOpacity
+                    onPress={handleToggleFavorite}
+                    disabled={deleteLoading}
+                    style={[styles.modalButton, styles.modalButtonSecondary]}
+                  >
+                    <Ionicons
+                      name={selectedIsFavorite ? 'heart' : 'heart-outline'}
+                      size={16}
+                      color={colors.textPrimary}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.modalButtonText}>
+                      {selectedIsFavorite ? 'Unfavorite' : 'Favorite'}
+                    </Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={handleSendToFriend}
                     disabled={deleteLoading}
@@ -316,6 +482,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.bgCardAlt,
   },
+  favoriteBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(4,9,17,0.75)',
+    borderWidth: 1,
+    borderColor: colors.bgCardBorder,
+  },
   previewFallback: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -348,6 +527,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   modalButtonPrimary: { backgroundColor: colors.accent },
+  modalButtonSecondary: { backgroundColor: colors.bgCardAlt, borderWidth: 1, borderColor: colors.bgCardBorder },
   modalButtonDanger: { backgroundColor: 'rgba(251,113,133,0.2)', borderWidth: 1, borderColor: 'rgba(251,113,133,0.35)' },
   modalButtonText: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
   modalButtonTextDark: { color: colors.onAccent, fontSize: 16, fontWeight: '700' },

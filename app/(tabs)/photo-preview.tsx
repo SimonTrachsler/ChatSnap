@@ -20,6 +20,7 @@ import {
   uploadBase64ToUserPhotos,
 } from '@/lib/uploadHelper';
 import { insertUserPhotoRecord } from '@/lib/userPhotos';
+import { reportError, trackEvent } from '@/lib/telemetry';
 import { usePendingPhotoStore } from '@/store/usePendingPhotoStore';
 import { colors, radius, spacing } from '@/ui/theme';
 const USE_MANIPULATOR = true;
@@ -155,6 +156,10 @@ export default function PhotoPreviewScreen() {
       uploadCompleted = true;
 
       await insertUserPhotoRecord(user.id, storagePath);
+      void trackEvent('photo_saved_to_gallery', {
+        storagePath,
+        viaManipulator: USE_MANIPULATOR,
+      });
 
       setPendingPhotoUri(null);
       if (navigateAfter === 'gallery') {
@@ -174,6 +179,10 @@ export default function PhotoPreviewScreen() {
         }
       }
       logSaveFailure(uploadCompleted ? 'database_insert' : 'storage_upload', storagePath, e);
+      void reportError('photo_preview_save_failed', e, {
+        step: uploadCompleted ? 'database_insert' : 'storage_upload',
+        storagePath,
+      });
       const friendly = toEnglishSaveError(e);
       setError(friendly);
       Alert.alert('Save failed', friendly, [{ text: 'OK' }]);

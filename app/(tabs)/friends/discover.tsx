@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ import { Avatar } from '@/ui/components/Avatar';
 import { colors, radius, spacing } from '@/ui/theme';
 
 const DISCOVER_LIMIT = 20;
-const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 220;
 
 type DisplayUser = { id: string; username: string | null; avatar_url: string | null };
 
@@ -57,26 +57,41 @@ export default function DiscoverScreen() {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoverRequestRef = useRef(0);
+  const searchRequestRef = useRef(0);
 
-  const loadDiscover = useCallback(async () => {
+  const loadDiscover = useCallback(async (forceRefresh = false) => {
+    const requestId = discoverRequestRef.current + 1;
+    discoverRequestRef.current = requestId;
+    const isStale = () => discoverRequestRef.current !== requestId;
+
     if (!userId) {
+      if (isStale()) return;
       setUsers([]);
       setLoading(false);
+      setRelationshipByUserId({});
       return;
     }
+
     setLoading(true);
     setError(null);
     try {
-      const list = normalizeDisplayUsers(await getDiscoverUsers(DISCOVER_LIMIT, userId), userId);
+      const list = normalizeDisplayUsers(
+        await getDiscoverUsers(DISCOVER_LIMIT, userId, { forceRefresh }),
+        userId,
+      );
+      if (isStale()) return;
       const states = await getRelationshipStates(userId, list.map((u) => u.id));
+      if (isStale()) return;
       const filteredList = list.filter((user) => shouldShowDiscoverUser(states[user.id])).slice(0, DISCOVER_LIMIT);
       setUsers(filteredList);
       setRelationshipByUserId((prev) => ({ ...prev, ...states }));
     } catch (e) {
+      if (isStale()) return;
       setError((e as { message?: string })?.message ?? 'Failed to load users.');
       setUsers([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [userId]);
 
@@ -88,31 +103,41 @@ export default function DiscoverScreen() {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const q = searchQuery.trim();
     if (!q) {
+      searchRequestRef.current += 1;
       setSearchResults([]);
       setSearchLoading(false);
       return;
     }
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+    const isStale = () => searchRequestRef.current !== requestId;
+
     setSearchLoading(true);
     searchDebounceRef.current = setTimeout(async () => {
       searchDebounceRef.current = null;
       if (!userId) {
+        if (isStale()) return;
         setSearchResults([]);
         setSearchLoading(false);
         return;
       }
       try {
-        const list = await searchProfiles(q);
+        const list = await searchProfiles(q, { currentUserId: userId });
+        if (isStale()) return;
         const filtered = normalizeDisplayUsers(list, userId);
         setSearchResults(filtered);
         const states = await getRelationshipStates(userId, filtered.map((r) => r.id));
+        if (isStale()) return;
         setRelationshipByUserId((prev) => ({ ...prev, ...states }));
       } catch {
+        if (isStale()) return;
         setSearchResults([]);
       } finally {
-        setSearchLoading(false);
+        if (!isStale()) setSearchLoading(false);
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => {
+      searchRequestRef.current += 1;
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [searchQuery, userId]);
@@ -171,8 +196,8 @@ export default function DiscoverScreen() {
 
   const getAddButtonState = (item: DisplayUser) => {
     const state = relationshipByUserId[item.id];
-    if (addingId === item.id) return { disabled: true, label: 'Sending…', loading: true, isAccept: false };
-    if (acceptingId === item.id) return { disabled: true, label: 'Accepting…', loading: true, isAccept: true };
+    if (addingId === item.id) return { disabled: true, label: 'Sending...', loading: true, isAccept: false };
+    if (acceptingId === item.id) return { disabled: true, label: 'Accepting...', loading: true, isAccept: true };
     if (addingId !== null || acceptingId !== null) return { disabled: true, label: 'Add', loading: false, isAccept: false };
     if (state === 'already_friends') return { disabled: true, label: 'Friends', loading: false, isAccept: false };
     if (state === 'outgoing_pending') return { disabled: true, label: 'Request sent', loading: false, isAccept: false };
@@ -213,12 +238,11 @@ export default function DiscoverScreen() {
 
   const suggestionIds = new Set(users.map((u) => u.id));
   const dedupedSearch = searchResults.filter((u) => !suggestionIds.has(u.id));
-
-  const sections: { title: string; data: DisplayUser[] }[] = [];
+  const sections: Array<{ title: string; data: DisplayUser[] }> = [];
   if (searchQuery.trim()) {
     if (dedupedSearch.length > 0 || searchLoading) {
       sections.push({
-        title: searchLoading ? 'Search results…' : 'Search results',
+        title: searchLoading ? 'Search results...' : 'Search results',
         data: dedupedSearch,
       });
     }
@@ -228,6 +252,7 @@ export default function DiscoverScreen() {
   } else if (users.length > 0) {
     sections.push({ title: 'Suggestions', data: users });
   }
+
   const showInitialEmpty = !searchQuery.trim() && !loading && users.length === 0;
 
   return (
@@ -237,7 +262,7 @@ export default function DiscoverScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Discover</Text>
-        <TouchableOpacity style={styles.refreshBtn} onPress={loadDiscover} disabled={loading} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.refreshBtn} onPress={() => loadDiscover(true)} disabled={loading} activeOpacity={0.7}>
           <Ionicons name="refresh" size={22} color={colors.accent} />
         </TouchableOpacity>
       </View>
@@ -269,7 +294,7 @@ export default function DiscoverScreen() {
       {loading && users.length === 0 ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.hint}>Loading…</Text>
+          <Text style={styles.hint}>Loading...</Text>
         </View>
       ) : showInitialEmpty ? (
         <View style={styles.centered}>
@@ -278,7 +303,7 @@ export default function DiscoverScreen() {
       ) : sections.length === 0 && searchLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.hint}>Searching…</Text>
+          <Text style={styles.hint}>Searching...</Text>
         </View>
       ) : sections.length === 0 ? (
         <View style={styles.centered}>

@@ -19,6 +19,8 @@ import { listFriends, type FriendListItem } from '@/lib/friendRequests';
 import { createSnapWithImage } from '@/lib/snapSend';
 import { getOrCreateThread, sendSnapMessage } from '@/lib/chat';
 import { uriToBase64, blobToBase64 } from '@/lib/uploadHelper';
+import { reportError, trackEvent } from '@/lib/telemetry';
+import { createStoryFromUri } from '@/lib/socialFeatures';
 import { AppButton } from '@/ui/components/AppButton';
 import { Avatar } from '@/ui/components/Avatar';
 import { EmptyState } from '@/ui/components/EmptyState';
@@ -89,6 +91,7 @@ export default function SnapSendScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [addingToStory, setAddingToStory] = useState(false);
   const sendingRef = useRef(false);
 
   const loadFriends = useCallback(async () => {
@@ -122,7 +125,7 @@ export default function SnapSendScreen() {
   }
 
   async function handleSend() {
-    if (selectedIds.length === 0 || !userId || !photoSource || sendingRef.current) return;
+    if (selectedIds.length === 0 || !userId || !photoSource || sendingRef.current || addingToStory) return;
     sendingRef.current = true;
     setSending(true);
     try {
@@ -160,13 +163,42 @@ export default function SnapSendScreen() {
       if (errors.length > 0) {
         Alert.alert('Partial failure', `Could not send to: ${errors.join(', ')}`);
       }
+      void trackEvent('snap_send_completed', {
+        recipientsSelected: selectedIds.length,
+        failedRecipients: errors.length,
+        source: galleryUri ? 'gallery' : 'camera',
+      });
       clearAll();
       router.replace('/');
     } catch (e) {
+      void reportError('snap_send_failed', e, {
+        recipientsSelected: selectedIds.length,
+        source: galleryUri ? 'gallery' : 'camera',
+      });
       Alert.alert('Error', e instanceof Error ? e.message : 'Send failed.', [{ text: 'OK' }]);
     } finally {
       sendingRef.current = false;
       setSending(false);
+    }
+  }
+
+  async function handleAddToMyStory() {
+    if (!photoSource || !userId || addingToStory || sending) return;
+    setAddingToStory(true);
+    try {
+      await createStoryFromUri(userId, photoSource, 'image');
+      void trackEvent('story_add_from_send', {
+        source: galleryUri ? 'gallery' : 'camera',
+      });
+      Alert.alert('Added to My Story', 'Your story is now visible to friends for 24 hours.');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not add to story.';
+      void reportError('story_add_from_send_failed', e, {
+        source: galleryUri ? 'gallery' : 'camera',
+      });
+      Alert.alert('Story failed', message);
+    } finally {
+      setAddingToStory(false);
     }
   }
 
@@ -181,6 +213,28 @@ export default function SnapSendScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.topSection}>
+        <PageHeader
+          title="Choose recipients"
+          left={(
+            <TouchableOpacity onPress={handleCancel} style={styles.headerIcon} activeOpacity={0.82}>
+              <Ionicons name="close" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+          )}
+        />
+        <Card style={styles.storyCard}>
+          <Text style={styles.storyTitle}>My Story</Text>
+          <Text style={styles.storySubtitle}>Post this snap to your story for 24 hours.</Text>
+          <AppButton
+            label="Add to My Story"
+            onPress={handleAddToMyStory}
+            loading={addingToStory}
+            disabled={sending}
+            icon="albums-outline"
+          />
+        </Card>
+      </View>
+
       <FlatList<FriendListItem>
         data={friends}
         keyExtractor={(item: FriendListItem) => item.id}
@@ -192,16 +246,6 @@ export default function SnapSendScreen() {
         maxToRenderPerBatch={8}
         removeClippedSubviews
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadFriends} tintColor={colors.accent} />}
-        ListHeaderComponent={
-          <PageHeader
-            title="Choose recipients"
-            left={(
-              <TouchableOpacity onPress={handleCancel} style={styles.headerIcon} activeOpacity={0.82}>
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </TouchableOpacity>
-            )}
-          />
-        }
         ListEmptyComponent={
           loading && !hasLoadedOnceRef.current ? (
             <View style={styles.centered}>
@@ -218,7 +262,7 @@ export default function SnapSendScreen() {
         <AppButton
           label={selectedIds.length === 0 ? 'Select friends' : `Send to ${selectedIds.length} friend${selectedIds.length !== 1 ? 's' : ''}`}
           onPress={handleSend}
-          disabled={selectedIds.length === 0 || sending}
+          disabled={selectedIds.length === 0 || sending || addingToStory}
           loading={sending}
           icon="send"
         />
@@ -229,6 +273,9 @@ export default function SnapSendScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
+  topSection: {
+    paddingHorizontal: spacing.lg,
+  },
   headerIcon: {
     width: 42,
     height: 42,
@@ -239,8 +286,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.bgCardBorder,
   },
+  storyCard: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  storyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  storySubtitle: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  list: { paddingHorizontal: spacing.lg, paddingBottom: 140 },
+  list: { paddingHorizontal: spacing.lg, paddingBottom: 220 },
   friendTouchable: {
     marginBottom: spacing.sm,
   },

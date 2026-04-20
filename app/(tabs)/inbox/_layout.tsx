@@ -15,6 +15,7 @@ export default function InboxLayout() {
     >
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[userId]" />
+      <Stack.Screen name="group/[groupId]" />
     </Stack>
   );
 }

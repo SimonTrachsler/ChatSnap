@@ -19,6 +19,7 @@ declare module 'react' {
   };
   export const memo: <T>(component: T) => T;
   export const startTransition: (scope: () => void) => void;
+  export const useMemo: <T>(factory: () => T, deps: readonly unknown[]) => T;
   export default React;
 }
 

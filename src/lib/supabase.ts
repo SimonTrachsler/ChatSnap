@@ -1,6 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type User } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
@@ -32,18 +33,68 @@ function assertEnv(): void {
     );
   }
 
-  if (__DEV__) {
-    console.log('[supabase] URL present:', !!supabaseUrl);
-    console.log('[supabase] Key format:', supabaseAnonKey.startsWith('eyJ') ? 'valid JWT' : 'INVALID');
-  }
 }
 
 assertEnv();
 
+type AuthStorageAdapter = {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+};
+
+const noOpStorage: AuthStorageAdapter = {
+  async getItem() {
+    return null;
+  },
+  async setItem() {},
+  async removeItem() {},
+};
+
+const webStorage: AuthStorageAdapter = {
+  async getItem(key) {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  async setItem(key, value) {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // ignore quota/private-mode storage failures
+    }
+  },
+  async removeItem(key) {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // ignore storage failures
+    }
+  },
+};
+
+function getAuthStorage(): AuthStorageAdapter {
+  if (Platform.OS !== 'web') {
+    return AsyncStorage;
+  }
+  if (typeof window === 'undefined') {
+    return noOpStorage;
+  }
+  return webStorage;
+}
+
+const authStorage = getAuthStorage();
+const shouldPersistSession = !(Platform.OS === 'web' && typeof window === 'undefined');
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
-    persistSession: true,
+    storage: authStorage,
+    persistSession: shouldPersistSession,
     autoRefreshToken: true,
     detectSessionInUrl: false,
   },

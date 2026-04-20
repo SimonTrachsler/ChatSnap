@@ -4,6 +4,9 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useActiveThreadStore } from '@/store/useActiveThreadStore';
 
+const PROFILE_NAME_CACHE_TTL_MS = 5 * 60 * 1000;
+const REFRESH_DEBOUNCE_MS = 250;
+
 function getProfileUsername(profile: unknown): string | null {
   if (!profile || typeof profile !== 'object' || !('username' in profile)) return null;
   const username = (profile as { username?: unknown }).username;
@@ -26,6 +29,48 @@ export function useInboxRealtime(onBadgeRefresh?: () => void) {
   useEffect(() => {
     if (!userId) return;
 
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const profileNameCache = new Map<string, { name: string; ts: number }>();
+    const profileNameInFlight = new Map<string, Promise<string>>();
+
+    const queueRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        refreshRef.current?.();
+      }, REFRESH_DEBOUNCE_MS);
+    };
+
+    const resolveSenderName = async (senderId?: string): Promise<string> => {
+      if (!senderId) return 'Unknown';
+      const now = Date.now();
+      const cached = profileNameCache.get(senderId);
+      if (cached && now - cached.ts < PROFILE_NAME_CACHE_TTL_MS) return cached.name;
+
+      const inFlight = profileNameInFlight.get(senderId);
+      if (inFlight) return inFlight;
+
+      const request = (async () => {
+        try {
+          const res = await supabase
+            .from('profiles')
+            .select('username')
+            .eq('id', senderId)
+            .maybeSingle();
+          const name = getProfileUsername(res.data) ?? senderId;
+          profileNameCache.set(senderId, { name, ts: Date.now() });
+          return name;
+        } catch {
+          return senderId;
+        } finally {
+          profileNameInFlight.delete(senderId);
+        }
+      })();
+
+      profileNameInFlight.set(senderId, request);
+      return request;
+    };
+
     const channel = supabase
       .channel('inbox_realtime')
       .on(
@@ -33,60 +78,34 @@ export function useInboxRealtime(onBadgeRefresh?: () => void) {
         { event: 'INSERT', schema: 'public', table: 'snaps', filter: `recipient_id=eq.${userId}` },
         async (payload) => {
           const senderId = (payload.new as { sender_id?: string }).sender_id;
-          let name = senderId ?? 'Unknown';
-          if (senderId) {
-            const { data: p } = await supabase
-              .from('profiles')
-              .select('username')
-              .eq('id', senderId)
-              .maybeSingle();
-            name = getProfileUsername(p) ?? name;
-          }
+          const name = await resolveSenderName(senderId);
           showToast(`New snap from ${name}`);
-          refreshRef.current?.();
+          queueRefresh();
         },
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+        { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `sender_id=neq.${userId}` },
         async (payload) => {
           const row = payload.new as { sender_id?: string; thread_id?: string };
-          if (row.sender_id === userId) return;
-
-          // Check this thread belongs to the current user
-          if (row.thread_id) {
-            const { data: thread } = await supabase
-              .from('chat_threads')
-              .select('id')
-              .eq('id', row.thread_id)
-              .or(`user_a.eq.${userId},user_b.eq.${userId}`)
-              .maybeSingle();
-            if (!thread) return;
-          }
+          if (!row.thread_id) return;
 
           // Suppress toast if this thread is currently open
           const activeThread = useActiveThreadStore.getState().activeThreadId;
           if (row.thread_id && row.thread_id === activeThread) {
-            refreshRef.current?.();
+            queueRefresh();
             return;
           }
 
-          let name = row.sender_id ?? 'Unbekannt';
-          if (row.sender_id) {
-            const { data: p } = await supabase
-              .from('profiles')
-              .select('username')
-              .eq('id', row.sender_id)
-              .maybeSingle();
-            name = getProfileUsername(p) ?? name;
-          }
+          const name = await resolveSenderName(row.sender_id);
           showToast(`New message from ${name}`);
-          refreshRef.current?.();
+          queueRefresh();
         },
       )
       .subscribe();
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       supabase.removeChannel(channel);
     };
   }, [userId, showToast]);

@@ -24,6 +24,7 @@ import {
   getPendingRequestIdFromRequester,
   removeFriend,
 } from '@/lib/friendRequests';
+import { getFriendshipStreaks, listBestFriendIds, setBestFriend } from '@/lib/socialFeatures';
 import { Avatar } from '@/ui/components/Avatar';
 import { Card } from '@/ui/components/Card';
 import { colors, radius, spacing } from '@/ui/theme';
@@ -46,18 +47,24 @@ export default function FriendDetailScreen() {
   const [userGlobalStats, setUserGlobalStats] = useState<UserStats | null>(null);
   const [acceptDeclineLoading, setAcceptDeclineLoading] = useState(false);
   const [removeLoading, setRemoveLoading] = useState(false);
+  const [isBestFriend, setIsBestFriend] = useState(false);
+  const [bestFriendLoading, setBestFriendLoading] = useState(false);
+  const [streakDays, setStreakDays] = useState(0);
+  const [streakPoints, setStreakPoints] = useState(0);
 
   const loadData = useCallback(async () => {
     if (!friendId) return;
     setLoading(true);
     try {
-      const [profileRes, state, requestId, aliasVal, stats, globalStats] = await Promise.all([
+      const [profileRes, state, requestId, aliasVal, stats, globalStats, bestFriendIds, streakList] = await Promise.all([
         supabase.from('profiles').select('username, avatar_url, bio').eq('id', friendId).maybeSingle(),
         myId ? getRelationshipState(myId, friendId) : Promise.resolve('none' as RelationshipState),
         myId ? getPendingRequestIdFromRequester(myId, friendId) : Promise.resolve(null),
         getAlias(friendId),
         myId ? getFriendStats(friendId) : Promise.resolve({ messages_total: 0, snaps_total: 0, score_total: 0 }),
         myId ? getUserStats(friendId) : Promise.resolve({ messages_total: 0, snaps_total: 0, score_total: 0 }),
+        myId ? listBestFriendIds(myId) : Promise.resolve<string[]>([]),
+        myId ? getFriendshipStreaks(100) : Promise.resolve([]),
       ]);
       setProfile(profileRes.data as Profile | null);
       setRelationshipState(state);
@@ -65,6 +72,10 @@ export default function FriendDetailScreen() {
       setAliasState(aliasVal ?? '');
       setFriendStats(stats);
       setUserGlobalStats(globalStats);
+      setIsBestFriend(bestFriendIds.includes(friendId));
+      const streak = streakList.find((entry) => entry.friend_id === friendId);
+      setStreakDays(streak?.streak_days ?? 0);
+      setStreakPoints(streak?.points ?? 0);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -238,6 +249,40 @@ export default function FriendDetailScreen() {
             <Text style={styles.msgCount}>Score: {friendStats ? friendStats.score_total : '…'}</Text>
           </Card>
 
+          <Card style={styles.section}>
+            <Text style={styles.sectionLabel}>Friendship streak</Text>
+            <Text style={styles.metaText}>Current streak: 🔥 {streakDays} day(s)</Text>
+            <Text style={styles.metaText}>Streak points: {streakPoints}</Text>
+            <TouchableOpacity
+              style={[styles.bestFriendBtn, bestFriendLoading && styles.bestFriendBtnDisabled]}
+              onPress={async () => {
+                if (!myId || !friendId || bestFriendLoading) return;
+                setBestFriendLoading(true);
+                try {
+                  await setBestFriend(myId, friendId, !isBestFriend);
+                  setIsBestFriend((prev) => !prev);
+                } catch (e) {
+                  Alert.alert('Error', e instanceof Error ? e.message : 'Could not update best friend.');
+                } finally {
+                  setBestFriendLoading(false);
+                }
+              }}
+              disabled={bestFriendLoading}
+              activeOpacity={0.7}
+            >
+              {bestFriendLoading ? (
+                <ActivityIndicator size="small" color={colors.onAccent} />
+              ) : (
+                <>
+                  <Ionicons name={isBestFriend ? 'star' : 'star-outline'} size={16} color={colors.onAccent} />
+                  <Text style={styles.bestFriendBtnText}>
+                    {isBestFriend ? 'Unpin Favorite Chat' : 'Pin as Favorite Chat'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </Card>
+
           <TouchableOpacity
             style={[styles.removeBtn, removeLoading && styles.removeBtnDisabled]}
             onPress={handleRemoveFriend}
@@ -331,6 +376,19 @@ const styles = StyleSheet.create({
   acceptDeclineDisabled: { opacity: 0.6 },
   acceptBtnText: { fontSize: 15, fontWeight: '600', color: colors.bg },
   declineBtnText: { fontSize: 15, fontWeight: '600', color: colors.textSecondary },
+  bestFriendBtn: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  bestFriendBtnDisabled: { opacity: 0.6 },
+  bestFriendBtnText: { fontSize: 14, fontWeight: '700', color: colors.onAccent },
   removeBtn: {
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
