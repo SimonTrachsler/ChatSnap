@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "scheme": "chatsnap",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
@@ -32,7 +31,8 @@
         {
           "cameraPermission": "Die App benoetigt Kamerazugriff, um Fotos aufzunehmen."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

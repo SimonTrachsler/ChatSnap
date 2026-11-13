@@ -4,16 +4,18 @@ Expo + React Native + TypeScript App mit Expo Router und Supabase.
 
 ## Tech Stack
 
-- Expo SDK 54
-- React Native 0.81
-- Expo Router 6
+- Expo SDK 58
+- React Native 0.88
+- Expo Router 58
 - Supabase (Auth, Postgres, Storage)
 - Zustand
 
 ## Setup
 
+Node.js 22 (ab 22.13) und pnpm 10 wie in der CI verwenden.
+
 ```bash
-npm install
+pnpm install --frozen-lockfile
 ```
 
 `.env` erstellen (siehe `.env.example`) und setzen:
@@ -55,6 +57,8 @@ npm run start:lan
 - `app/login.tsx`
 - `app/register.tsx`
 - `app/auth.tsx` (Legacy-Redirect)
+- `app/photo-preview.tsx` (photo preview)
+- `app/snap-send.tsx` (recipient selection)
 - `app/snap/[id].tsx`
 - `app/onboarding/bio.tsx`
 - `app/onboarding/avatar.tsx`
@@ -66,8 +70,6 @@ npm run start:lan
 - `app/(tabs)/friends/index.tsx`
 - `app/(tabs)/gallery.tsx`
 - `app/(tabs)/settings.tsx`
-- `app/(tabs)/photo-preview.tsx` (hidden tab route)
-- `app/(tabs)/snap-send.tsx` (hidden tab route)
 
 ### Nested Routes
 

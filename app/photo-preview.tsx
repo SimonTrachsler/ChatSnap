@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -87,39 +87,31 @@ function logSaveFailure(step: string, storagePath: string | null, error: unknown
   });
 }
 
-type NavigateAfterSave = 'tabs' | 'gallery';
-
 export default function PhotoPreviewScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const paramsUri = useLocalSearchParams<{ uri?: string }>().uri;
-  const pendingUri = usePendingPhotoStore((s) => s.pendingPhotoUri);
   const setPendingPhotoUri = usePendingPhotoStore((s) => s.setPendingPhotoUri);
-  const uri = pendingUri ?? paramsUri ?? null;
+  // The outgoing screen keeps its photo while the router closes it.
+  const [uri] = useState(() => usePendingPhotoStore.getState().pendingPhotoUri ?? paramsUri ?? null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savingRef = useRef(false);
-  const navigatingToSendRef = useRef(false);
-
-  useEffect(() => {
-    return () => {
-      if (!navigatingToSendRef.current) setPendingPhotoUri(null);
-    };
-  }, [setPendingPhotoUri]);
 
   if (!uri) {
     return (
       <View style={styles.container}>
         <Text style={styles.fallbackText}>No image</Text>
-        <TouchableOpacity style={styles.pillButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.pillButton} onPress={() => router.dismissTo('/')}>
           <Text style={styles.pillButtonText}>Back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  async function doSave(navigateAfter: NavigateAfterSave) {
+  async function handleSave() {
     if (savingRef.current || saving) return;
     const safeUri = uri;
     if (!safeUri) return;
@@ -128,6 +120,7 @@ export default function PhotoPreviewScreen() {
     setError(null);
     let storagePath: string | null = null;
     let uploadCompleted = false;
+    let saved = false;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user?.id) {
@@ -156,17 +149,11 @@ export default function PhotoPreviewScreen() {
       uploadCompleted = true;
 
       await insertUserPhotoRecord(user.id, storagePath);
+      saved = true;
       void trackEvent('photo_saved_to_gallery', {
         storagePath,
         viaManipulator: USE_MANIPULATOR,
       });
-
-      setPendingPhotoUri(null);
-      if (navigateAfter === 'gallery') {
-        router.replace('/(tabs)/gallery');
-      } else {
-        router.replace('/(tabs)');
-      }
     } catch (e) {
       if (uploadCompleted && storagePath) {
         try {
@@ -184,22 +171,33 @@ export default function PhotoPreviewScreen() {
         storagePath,
       });
       const friendly = toEnglishSaveError(e);
-      setError(friendly);
-      Alert.alert('Save failed', friendly, [{ text: 'OK' }]);
+      if (navigation.isFocused()) {
+        setError(friendly);
+        Alert.alert('Save failed', friendly, [{ text: 'OK' }]);
+      }
     } finally {
-      savingRef.current = false;
-      setSaving(false);
+      if (!saved) {
+        savingRef.current = false;
+        setSaving(false);
+      }
+    }
+
+    if (saved && navigation.isFocused()) {
+      setPendingPhotoUri(null);
+      router.dismissTo('/');
     }
   }
 
-  function handleSave() { doSave('tabs'); }
   function handleSend() {
-    navigatingToSendRef.current = true;
-    router.push('/(tabs)/snap-send');
+    if (!uri || savingRef.current) return;
+    setPendingPhotoUri(uri);
+    router.push('/snap-send');
   }
   function handleDiscard() {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setPendingPhotoUri(null);
-    router.replace('/(tabs)');
+    router.dismissTo('/');
   }
 
   const topInset = insets.top + 12;

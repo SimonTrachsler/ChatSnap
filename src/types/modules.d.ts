@@ -36,6 +36,5 @@ declare module 'react-native' {
   export const StyleSheet: {
     create<T extends object>(styles: T): T;
     absoluteFill: any;
-    absoluteFillObject: any;
   };
 }

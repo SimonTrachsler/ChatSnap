@@ -9,7 +9,7 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
@@ -78,12 +78,14 @@ const RecipientRow = memo(function RecipientRow({
 
 export default function SnapSendScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const userId = useAuthStore((s) => s.user?.id) ?? null;
-  const pendingUri = usePendingPhotoStore((s) => s.pendingPhotoUri);
-  const galleryUri = usePendingPhotoStore((s) => s.pendingGalleryUri);
   const clearAll = usePendingPhotoStore((s) => s.clearAll);
-  const photoSource = galleryUri ?? pendingUri;
+  const [{ galleryUri, photoSource }] = useState(() => {
+    const { pendingGalleryUri, pendingPhotoUri } = usePendingPhotoStore.getState();
+    return { galleryUri: pendingGalleryUri, photoSource: pendingGalleryUri ?? pendingPhotoUri };
+  });
   const hasLoadedOnceRef = useRef(false);
 
   const [friends, setFriends] = useState<FriendListItem[]>([]);
@@ -118,7 +120,7 @@ export default function SnapSendScreen() {
       <View style={styles.container}>
         <PageHeader title="Choose recipients" />
         <EmptyState icon="image-outline" title="No photo available.">
-          <AppButton label="Back to camera" onPress={() => router.replace('/')} icon="arrow-back-outline" />
+          <AppButton label="Back to camera" onPress={() => router.dismissTo('/')} icon="arrow-back-outline" />
         </EmptyState>
       </View>
     );
@@ -128,6 +130,7 @@ export default function SnapSendScreen() {
     if (selectedIds.length === 0 || !userId || !photoSource || sendingRef.current || addingToStory) return;
     sendingRef.current = true;
     setSending(true);
+    let finished = false;
     try {
       let imageBytes: Uint8Array;
       if (galleryUri) {
@@ -160,7 +163,7 @@ export default function SnapSendScreen() {
           errors.push(name);
         }
       }
-      if (errors.length > 0) {
+      if (errors.length > 0 && navigation.isFocused()) {
         Alert.alert('Partial failure', `Could not send to: ${errors.join(', ')}`);
       }
       void trackEvent('snap_send_completed', {
@@ -168,17 +171,25 @@ export default function SnapSendScreen() {
         failedRecipients: errors.length,
         source: galleryUri ? 'gallery' : 'camera',
       });
-      clearAll();
-      router.replace('/');
+      finished = true;
     } catch (e) {
       void reportError('snap_send_failed', e, {
         recipientsSelected: selectedIds.length,
         source: galleryUri ? 'gallery' : 'camera',
       });
-      Alert.alert('Error', e instanceof Error ? e.message : 'Send failed.', [{ text: 'OK' }]);
+      if (navigation.isFocused()) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Send failed.', [{ text: 'OK' }]);
+      }
     } finally {
-      sendingRef.current = false;
-      setSending(false);
+      if (!finished) {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    }
+
+    if (finished && navigation.isFocused()) {
+      clearAll();
+      router.dismissTo(galleryUri ? '/(tabs)/gallery' : '/');
     }
   }
 
@@ -203,8 +214,14 @@ export default function SnapSendScreen() {
   }
 
   function handleCancel() {
-    clearAll();
-    router.replace('/');
+    if (sendingRef.current || addingToStory) return;
+    sendingRef.current = true;
+    if (galleryUri) clearAll();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace(galleryUri ? '/(tabs)/gallery' : '/');
+    }
   }
 
   function toggleRecipient(id: string) {
@@ -217,7 +234,7 @@ export default function SnapSendScreen() {
         <PageHeader
           title="Choose recipients"
           left={(
-            <TouchableOpacity onPress={handleCancel} style={styles.headerIcon} activeOpacity={0.82}>
+            <TouchableOpacity onPress={handleCancel} disabled={sending || addingToStory} style={styles.headerIcon} activeOpacity={0.82}>
               <Ionicons name="close" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
           )}

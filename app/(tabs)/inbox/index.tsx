@@ -36,6 +36,7 @@ import { PageHeader } from '@/ui/components/PageHeader';
 import { Card } from '@/ui/components/Card';
 import { colors, radius, spacing } from '@/ui/theme';
 
+const AnimatedView = Animated.View as typeof View;
 const PREVIEW_LEN = 48;
 const MAX_PINNED_CHATS = 3;
 const FOCUS_REFRESH_COOLDOWN_MS = 2500;
@@ -161,12 +162,12 @@ const DirectThreadRow = memo(function DirectThreadRow({
   return (
     <TouchableOpacity style={styles.rowTouchable} onPress={() => onPress(item.otherUserId)} activeOpacity={0.88}>
       <View style={styles.unreadRowWrap}>
-        {item.hasUnread ? <Animated.View pointerEvents="none" style={[styles.chatRowUnreadGlow, glowStyle]} /> : null}
-        <Animated.View style={item.hasUnread ? rowPulseStyle : undefined}>
+        {item.hasUnread ? <AnimatedView pointerEvents="none" style={[styles.chatRowUnreadGlow, glowStyle]} /> : null}
+        <AnimatedView style={item.hasUnread ? rowPulseStyle : undefined}>
           <Card style={[styles.chatRow, item.hasUnread && styles.chatRowUnread]}>
             <View style={styles.avatarWrap}>
               <Avatar uri={item.otherAvatarUrl} fallback={displayName} size="ml" />
-              {item.hasUnread ? <Animated.View pointerEvents="none" style={[styles.avatarUnreadRing, avatarRingStyle]} /> : null}
+              {item.hasUnread ? <AnimatedView pointerEvents="none" style={[styles.avatarUnreadRing, avatarRingStyle]} /> : null}
             </View>
             <View style={styles.rowText}>
               <View style={styles.rowTitleLine}>
@@ -174,7 +175,7 @@ const DirectThreadRow = memo(function DirectThreadRow({
                 {row.streakDays > 0 ? <Text style={styles.rowStreak}>{`${'\u{1F525}'} ${row.streakDays}`}</Text> : null}
                 {item.hasUnread ? (
                   <View style={styles.unreadBadgeWrap}>
-                    <Animated.View style={[styles.unreadDot, unreadDotStyle]} />
+                    <AnimatedView style={[styles.unreadDot, unreadDotStyle]} />
                     <Text style={styles.unreadBadgeText}>NEW</Text>
                   </View>
                 ) : null}
@@ -186,7 +187,7 @@ const DirectThreadRow = memo(function DirectThreadRow({
               <Text style={styles.rowTime}>{timeLabel}</Text>
             </View>
           </Card>
-        </Animated.View>
+        </AnimatedView>
       </View>
     </TouchableOpacity>
   );
@@ -456,7 +457,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   chatRowUnreadGlow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radius.lg + 2,
     borderWidth: 1.5,
     borderColor: 'rgba(125,211,252,0.95)',

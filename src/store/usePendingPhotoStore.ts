@@ -4,7 +4,7 @@ import { create } from 'zustand';
  * Holds pending photo URIs for the snap-send flow.
  * - pendingPhotoUri: local file:// URI from camera capture
  * - pendingGalleryUri: remote URI for a gallery photo (signed URL or public URL)
- * snap-send.tsx reads whichever is set (gallery takes priority).
+ * Starting a draft from either source replaces the previous draft.
  */
 export interface PendingPhotoState {
   pendingPhotoUri: string | null;
@@ -16,8 +16,8 @@ export interface PendingPhotoState {
 
 export const usePendingPhotoStore = create<PendingPhotoState>((set) => ({
   pendingPhotoUri: null,
-  setPendingPhotoUri: (uri) => set({ pendingPhotoUri: uri }),
+  setPendingPhotoUri: (uri) => set({ pendingPhotoUri: uri, ...(uri === null ? {} : { pendingGalleryUri: null }) }),
   pendingGalleryUri: null,
-  setPendingGalleryUri: (uri) => set({ pendingGalleryUri: uri }),
+  setPendingGalleryUri: (uri) => set({ pendingGalleryUri: uri, ...(uri === null ? {} : { pendingPhotoUri: null }) }),
   clearAll: () => set({ pendingPhotoUri: null, pendingGalleryUri: null }),
 }));

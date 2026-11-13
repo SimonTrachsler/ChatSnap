@@ -3,7 +3,6 @@
   "compilerOptions": {
     "strict": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts", "src/types/**/*.d.ts"],

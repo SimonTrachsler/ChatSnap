@@ -14,7 +14,7 @@ import { AppButton } from '@/ui/components/AppButton';
 import { Card } from '@/ui/components/Card';
 import { colors, radius, spacing, typography } from '@/ui/theme';
 
-const AnimatedView = Animated.View;
+const AnimatedView = Animated.View as typeof View;
 
 export default function WelcomeScreen() {
   const router = useRouter();

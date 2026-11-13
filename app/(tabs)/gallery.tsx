@@ -278,7 +278,7 @@ export default function GalleryScreen() {
     if (!imageUri) { setModalError('Image URL not available.'); return; }
     setPendingGalleryUri(imageUri);
     closePreview();
-    router.push('/(tabs)/snap-send');
+    router.push('/snap-send');
   }, [selectedPhoto, urls, setPendingGalleryUri, closePreview, router]);
 
   const handleToggleFavorite = useCallback(async () => {

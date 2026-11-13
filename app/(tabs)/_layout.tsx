@@ -12,6 +12,8 @@ import { colors, radius, shadows } from '@/ui/theme';
 import { getFloatingTabBarMetrics } from '@/ui/tabBar';
 import { TABS_TRANSITION_OPTIONS } from '@/ui/navigationTransitions';
 
+export const unstable_settings = { anchor: 'index' };
+
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const pendingIncomingCount = useFriendRequestsStore((s) => s.pendingIncomingCount);
@@ -74,6 +76,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         ...TABS_TRANSITION_OPTIONS,
@@ -118,7 +121,7 @@ export default function TabsLayout() {
         options={{
           title: 'Friends',
           tabBarLabel: 'Friends',
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <Ionicons name="people-outline" size={26} color={color} />
           ),
           tabBarBadge: pendingIncomingCount > 0
@@ -131,7 +134,7 @@ export default function TabsLayout() {
         options={{
           title: 'Inbox',
           tabBarLabel: 'Inbox',
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <Ionicons name="chatbubbles" size={26} color={color} />
           ),
           tabBarBadge: inboxBadgeTotal > 0
@@ -143,8 +146,9 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Camera',
+          animation: 'none',
           tabBarLabel: '',
-          tabBarIcon: ({ focused }) => (
+          tabBarIcon: ({ focused }: { focused: boolean }) => (
             <View style={[styles.cameraBtn, focused && styles.cameraBtnActive]}>
               <Ionicons name="camera" size={28} color={focused ? colors.onAccent : colors.textPrimary} />
             </View>
@@ -156,7 +160,7 @@ export default function TabsLayout() {
         options={{
           title: 'Gallery',
           tabBarLabel: 'Gallery',
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <Ionicons name="images-outline" size={26} color={color} />
           ),
         }}
@@ -166,25 +170,9 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           tabBarLabel: 'Settings',
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <Ionicons name="settings-outline" size={26} color={color} />
           ),
-        }}
-      />
-      <Tabs.Screen
-        name="photo-preview"
-        options={{
-          href: null,
-          title: 'PhotoPreview',
-          tabBarStyle: { display: 'none' },
-        }}
-      />
-      <Tabs.Screen
-        name="snap-send"
-        options={{
-          href: null,
-          title: 'SnapSend',
-          tabBarStyle: { display: 'none' },
         }}
       />
     </Tabs>

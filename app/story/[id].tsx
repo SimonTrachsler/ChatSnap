@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tapLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     top: 80,
     bottom: 70,
     zIndex: 3,

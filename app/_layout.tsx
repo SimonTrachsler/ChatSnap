@@ -141,6 +141,8 @@ function RootLayoutContent() {
         }}
       >
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="photo-preview" />
+        <Stack.Screen name="snap-send" />
         <Stack.Screen name="welcome" />
         <Stack.Screen name="auth" />
         <Stack.Screen name="login" />
